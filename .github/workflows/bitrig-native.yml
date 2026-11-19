@@ -66,7 +66,7 @@ jobs:
           derived_data="$RUNNER_TEMP/DerivedData-financekit-background"
           xcodebuild \
             -project Sure.xcodeproj \
-            -target 'Sure FinanceKit Background' \
+            -scheme Sure \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$derived_data" \

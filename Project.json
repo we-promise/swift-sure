@@ -191,6 +191,9 @@
           "path" : "App\/Domain\/Subscriptions\/BackendAccessGate.swift"
         },
         {
+          "path" : "App\/Domain\/Subscriptions\/SureDemoServer.swift"
+        },
+        {
           "path" : "App\/Domain\/Subscriptions\/SubscriptionProductIDs.swift"
         },
         {
