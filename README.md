@@ -90,8 +90,10 @@ The replay-safe publisher core ships in the app behind a foreground trigger: an
 explicit **Sync now**, and a debounced sync when the app becomes active. It
 cannot upload Wallet data until a revised provider contract is merged into Sure
 and pinned here, and the user completes separate upload consent and account
-mapping. The iOS 26 background-delivery target is held on a separate branch
-until Apple grants its entitlement, so unattended sync is not available. See
+mapping. This change also carries the iOS 26 background-delivery target. The
+FinanceKit capability is assigned to both the app and extension App IDs, but
+signing, archive, and detached physical-device delivery have not been verified,
+so unattended sync is not yet verified. See
 [the FinanceKit device publisher architecture](Docs/FinanceKitSyncArchitecture.md).
 
 ## AI Insight push notifications
@@ -118,15 +120,16 @@ credentials above.
 
 ## App versioning
 
-The app and Watch use the monthly release version in `Project.json`
-(`MARKETING_VERSION`, currently `2026.11`). Update both targets together when
-starting a new month's release. Build numbers remain separate and CI increments
-them for additional uploads within that release.
+The app, Watch, and FinanceKit background extension use the monthly release
+version in `Project.json` (`MARKETING_VERSION`, currently `2026.11`). Update all
+three targets together when starting a new month's release. Build numbers remain
+separate and CI increments them for additional uploads within that release.
 
 Generated Info.plists, Bitrig upload metadata, and CI use the same configured
 version. Do not rewrite `CFBundleShortVersionString` in a build phase: the upload
-request and bundle must agree. `.github/scripts/app_version.rb` validates app/Watch
-alignment and supplies the configured version to CI; `SURE_APP_VERSION` must match.
+request and bundle must agree. `.github/scripts/app_version.rb` validates app,
+Watch, and FinanceKit extension alignment and supplies the configured version
+to CI; `SURE_APP_VERSION` must match.
 
 ## TestFlight deployments
 

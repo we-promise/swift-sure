@@ -61,6 +61,36 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate --spec Project.json
 
+      - name: Verify generated FinanceKit extension configuration
+        run: |
+          derived_data="$RUNNER_TEMP/DerivedData-financekit-background"
+          xcodebuild \
+            -project Sure.xcodeproj \
+            -target 'Sure FinanceKit Background' \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$derived_data" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+          extension_info="$(find "$derived_data/Build/Products" -path '*/Sure FinanceKit Background.appex/Info.plist' -print -quit)"
+          test -n "$extension_info"
+          expected_version="$(ruby .github/scripts/app_version.rb)"
+          expected_build_number="$(jq -r '.targets["Sure FinanceKit Background"].settings.base.CURRENT_PROJECT_VERSION' Project.json)"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$extension_info" | grep -Fx 'am.sure.insights.financekit-background'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$extension_info" | grep -Fx "$expected_version"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$extension_info" | grep -Fx "$expected_build_number"
+          /usr/libexec/PlistBuddy -c 'Print :EXAppExtensionAttributes:EXExtensionPointIdentifier' "$extension_info" | grep -Fx 'com.apple.financekit.background-delivery'
+          app_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' App/iOS.entitlements)"
+          extension_group="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' FinanceKitBackground/FinanceKitBackground.entitlements)"
+          test "$app_group" = 'group.am.sure.insights.financekit'
+          test "$extension_group" = "$app_group"
+          app_keychain_group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' App/iOS.entitlements)"
+          extension_keychain_group="$(/usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' FinanceKitBackground/FinanceKitBackground.entitlements)"
+          test "$app_keychain_group" = '$(AppIdentifierPrefix)am.sure.insights.financekit'
+          test "$extension_keychain_group" = "$app_keychain_group"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.financekit:0' FinanceKitBackground/FinanceKitBackground.entitlements | grep -Fx 'financial-data'
+
       - name: Test
         run: |
           simulator_id="$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[]] | first | .udid')"
