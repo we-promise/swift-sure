@@ -15,16 +15,33 @@ struct SubscriptionAccessStoreTests {
     #expect(!plan.hasTrial)
   }
 
-  @Test func pendingAndCancelledPurchasesStayLocked() async {
-    for outcome in [SubscriptionPurchaseOutcome.pending, .cancelled] {
+  @Test func pendingAndCancelledPurchasesShowDistinctFeedbackAndStayLocked() async {
+    let cases: [(SubscriptionPurchaseOutcome, SubscriptionAccessStore.CheckoutStatus)] = [
+      (.pending, .pendingApproval),
+      (.cancelled, .incomplete)
+    ]
+    for (outcome, status) in cases {
       let service = PurchaseServiceFake()
       service.outcome = outcome
       let store = SubscriptionAccessStore(service: service, gate: BackendAccessGate(), waitUntil: { _ in throw CancellationError() })
       await store.refresh()
       await store.purchase(SubscriptionPlan(id: "monthly", price: "$0.99", isAnnual: false, trialDuration: "1 week"))
+      #expect(store.checkoutStatus == status)
+      #expect(!store.isBusy)
       #expect(!store.hasAccess)
       #expect(!store.gate.isAllowed)
     }
+  }
+
+  @Test func failedPlanRefreshKeepsCheckoutFeedback() async {
+    let service = PurchaseServiceFake()
+    let store = SubscriptionAccessStore(service: service, gate: BackendAccessGate(), waitUntil: { _ in throw CancellationError() })
+    await store.refresh()
+    await store.purchase(SubscriptionPlan(id: "monthly", price: "$0.99", isAnnual: false))
+    service.shouldFailPlanLoad = true
+    await store.refresh()
+    #expect(store.checkoutStatus == .incomplete)
+    #expect(store.message != nil)
   }
 
   @Test func cancellationKeepsPaidAccessAndExpirationLocks() async {
@@ -43,9 +60,13 @@ struct SubscriptionAccessStoreTests {
   @Test func restoringVerifiedSharedAccessUnlocks() async {
     let service = PurchaseServiceFake()
     let store = SubscriptionAccessStore(service: service, gate: BackendAccessGate(), waitUntil: { _ in throw CancellationError() })
+    await store.refresh()
+    await store.purchase(SubscriptionPlan(id: "monthly", price: "$0.99", isAnnual: false))
+    #expect(store.checkoutStatus == .incomplete)
     service.value = SubscriptionEntitlement(expiration: .distantFuture, renewalCancelled: false)
     await store.restore()
     #expect(store.hasAccess)
+    #expect(store.checkoutStatus == nil)
     #expect(service.restored)
   }
 }
@@ -54,10 +75,16 @@ struct SubscriptionAccessStoreTests {
 private final class PurchaseServiceFake: SubscriptionServicing {
   var value: SubscriptionEntitlement?
   var outcome: SubscriptionPurchaseOutcome = .cancelled
+  var shouldFailPlanLoad = false
   var restored = false
-  func plans() async throws -> [SubscriptionPlan] { [] }
+  func plans() async throws -> [SubscriptionPlan] {
+    if shouldFailPlanLoad { throw PlanLoadError.unavailable }
+    return []
+  }
   func entitlement() async -> SubscriptionEntitlement? { value }
   func purchase(_ id: String) async throws -> SubscriptionPurchaseOutcome { outcome }
   func restore() async throws { restored = true }
   func observe(_ changed: @escaping @MainActor () async -> Void) async { }
+
+  private enum PlanLoadError: Error { case unavailable }
 }

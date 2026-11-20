@@ -1,3 +1,4 @@
+import Accessibility
 import SwiftUI
 
 struct SubscriptionAccessView: View {
@@ -194,29 +195,44 @@ struct SubscriptionAccessView: View {
   }
 
   private func purchaseBar(_ plan: SubscriptionPlan) -> some View {
-    Button {
-      Task { await access.purchase(plan) }
-    } label: {
-      HStack {
-        if access.isBusy { ProgressView() }
-        if let trial = plan.trialDuration {
-          Text("Start \(trial) free")
-        } else {
-          Text("Subscribe")
+    VStack(spacing: 8) {
+      Button {
+        Task { await access.purchase(plan) }
+      } label: {
+        HStack {
+          if access.isBusy { ProgressView() }
+          if let trial = plan.trialDuration {
+            Text("Start \(trial) free")
+          } else {
+            Text("Subscribe")
+          }
         }
+        .font(.headline)
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .padding(.horizontal, 12)
+        .foregroundStyle(SureTheme.ink)
+        .background(SureTheme.accent, in: RoundedRectangle(cornerRadius: 16))
       }
-      .font(.headline)
-      .frame(maxWidth: .infinity, minHeight: 52)
-      .padding(.horizontal, 12)
-      .foregroundStyle(SureTheme.ink)
-      .background(SureTheme.accent, in: RoundedRectangle(cornerRadius: 16))
+      .buttonStyle(.plain)
+      .disabled(access.isBusy)
+
+      if let status = access.checkoutStatus {
+        Text(status.text)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
+      }
     }
-    .buttonStyle(.plain)
-    .disabled(access.isBusy)
     .frame(maxWidth: 560)
     .padding(.horizontal, 20).padding(.vertical, 8)
     .frame(maxWidth: .infinity)
     .background(.bar)
     .overlay(alignment: .top) { Divider() }
+    .onChange(of: access.checkoutStatus) { _, status in
+      if let status {
+        AccessibilityNotification.Announcement(String(localized: status.text)).post()
+      }
+    }
   }
 }

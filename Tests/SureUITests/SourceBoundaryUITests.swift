@@ -404,6 +404,22 @@ final class SourceBoundaryUITests: XCTestCase {
   #endif
 
   @MainActor
+  func testIncompletePurchaseShowsFeedbackNextToSubscribe() throws {
+    let app = launch("subscription-sheet")
+    let subscribe = app.buttons["Subscribe"]
+    XCTAssertTrue(subscribe.waitForExistence(timeout: 10))
+    let status = app.staticTexts["Your purchase didn’t complete."]
+    XCTAssertFalse(status.exists)
+    subscribe.tap()
+    XCTAssertTrue(status.waitForExistence(timeout: 5))
+    XCTAssertTrue(app.frame.contains(status.frame))
+    XCTAssertGreaterThanOrEqual(status.frame.minY, subscribe.frame.maxY)
+    XCTAssertTrue(subscribe.isEnabled)
+    XCTAssertTrue(subscribe.isHittable)
+    try app.performAccessibilityAudit(for: .sufficientElementDescription)
+  }
+
+  @MainActor
   func testSynchronizedWalletUsesBackendCardAndSignedBalance() throws {
     let app = launch("wallet-synced")
     XCTAssertTrue(app.staticTexts["Synchronized Apple Card"].waitForExistence(timeout: 10))
