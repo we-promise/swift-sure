@@ -493,6 +493,46 @@ struct FinanceKitSyncStoreTests {
     #expect(store.state == .active)
   }
 
+  @Test("A missing subscription entitlement blocks enrollment before any request and survives refresh")
+  func enrollmentRequiresSubscriptionEntitlement() async {
+    let diagnostics = DiagnosticRecordSpy()
+    let transport = HTTPDataTransportStub([])
+    let model = FinanceKitSyncStore(client: FinanceKitControlPlaneClient(transport: SureAPITransport(
+      baseURL: URL(string: "https://sure.example")!, dataTransport: transport,
+      authorizer: UnauthenticatedRequestAuthorizer())), publisher: FinanceKitPublisherStub(connectionID: nil),
+      preferences: TestSyncPreferences(true), diagnostics: diagnostics, entitlementExpiration: { nil })
+    await model.enroll(accounts: [Self.account])
+    #expect(await transport.requests().isEmpty)
+    #expect(model.state == .unavailable)
+    #expect(model.unavailableReason == .subscriptionMissing)
+    #expect(diagnostics.records == [.walletSyncUnavailable(reason: .subscriptionMissing)])
+    await model.refresh()
+    #expect(model.state == .unavailable)
+    #expect(model.unavailableReason == .subscriptionMissing)
+  }
+
+  @Test("A server without Wallet sync capability explains itself and is reported")
+  func capabilitiesUnavailableIsExplained() async throws {
+    let diagnostics = DiagnosticRecordSpy()
+    let transport = HTTPDataTransportStub([try .http(json: #"{"available":false}"#)])
+    let model = store(transport: transport, publisher: FinanceKitPublisherStub(connectionID: nil), diagnostics: diagnostics)
+    await model.enroll(accounts: [Self.account])
+    #expect(model.state == .unavailable)
+    #expect(model.unavailableReason == .capabilitiesUnavailable)
+    #expect(diagnostics.records == [.walletSyncUnavailable(reason: .capabilitiesUnavailable)])
+    #expect(await transport.requests().map(\.httpMethod) == ["GET"])
+  }
+
+  @Test("A failed enrollment stays visible through refreshes until the next attempt")
+  func enrollmentFailureSurvivesRefresh() async {
+    let transport = HTTPDataTransportStub([.failure(URLError(.notConnectedToInternet))])
+    let model = store(transport: transport, publisher: FinanceKitPublisherStub(connectionID: nil))
+    await model.enroll(accounts: [Self.account])
+    #expect(model.state == .failed("Wallet sync couldn’t be enabled. Try again."))
+    await model.refresh()
+    #expect(model.state == .failed("Wallet sync couldn’t be enabled. Try again."))
+  }
+
   private static let account = LocalFinancialAccount(
     id: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!, name: "Wallet", institutionName: "Wallet",
     kind: .liability, balance: Money(minorUnits: 100, currency: CurrencyCode("USD")!))

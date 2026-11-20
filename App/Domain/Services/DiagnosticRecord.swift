@@ -28,6 +28,10 @@ enum DiagnosticRecord: Equatable {
     field: FinanceKitEventValidationIssue.Field? = nil,
     rule: DiagnosticWalletValidationRule? = nil
   )
+  /// Enrollment stopped at a device-side gate before any request was made.
+  /// The reason is closed vocabulary; nothing about the StoreKit transaction
+  /// or the server response crosses the diagnostics boundary.
+  case walletSyncUnavailable(reason: DiagnosticWalletUnavailableReason)
 
   var message: String {
     switch self {
@@ -36,13 +40,15 @@ enum DiagnosticRecord: Equatable {
     case .transactionHistoryLoadFailed: "transactions.load_failed"
     case .budgetLoadFailed: "budgets.load_failed"
     case .walletSyncFailed: "wallet.sync_failed"
+    case .walletSyncUnavailable: "wallet.sync_unavailable"
     }
   }
 
   var level: DiagnosticLevel {
     switch self {
     case .launched: .info
-    case .cleanupFailed, .transactionHistoryLoadFailed, .budgetLoadFailed, .walletSyncFailed: .error
+    case .cleanupFailed, .transactionHistoryLoadFailed, .budgetLoadFailed, .walletSyncFailed,
+      .walletSyncUnavailable: .error
     }
   }
 
@@ -65,6 +71,7 @@ enum DiagnosticRecord: Equatable {
       if let field { values["field"] = field.rawValue }
       if let rule { values["rule"] = rule.rawValue }
       return values
+    case .walletSyncUnavailable(let reason): return ["reason": reason.rawValue]
     }
   }
 
@@ -77,6 +84,7 @@ enum DiagnosticRecord: Equatable {
     case .walletSyncFailed(let operation, let failure, let rejection, let field, let rule):
       return [message, operation.rawValue, failure.rawValue, rejection?.rawValue ?? "none",
         field?.rawValue ?? "none", rule?.rawValue ?? "none"]
+    case .walletSyncUnavailable(let reason): return [message, reason.rawValue]
     case .launched, .cleanupFailed: return nil
     }
   }
@@ -93,7 +101,8 @@ enum DiagnosticRecord: Equatable {
       source: .sure, scope: .recentActivity, failure: .unknown
     ).message,
     DiagnosticRecord.budgetLoadFailed(failure: .unknown, hasDownloadedData: false).message,
-    DiagnosticRecord.walletSyncFailed(operation: .sync, failure: .unknown).message
+    DiagnosticRecord.walletSyncFailed(operation: .sync, failure: .unknown).message,
+    DiagnosticRecord.walletSyncUnavailable(reason: .subscriptionMissing).message
   ])
 }
 
@@ -112,6 +121,12 @@ enum DiagnosticWalletFailure: String, CaseIterable {
   case sequenceExhausted = "sequence_exhausted", streamFailed = "stream_failed"
   case unsupportedSourceValue = "unsupported_source_value"
   case repairRequired = "repair_required", disconnectPending = "disconnect_pending"
+}
+
+/// Device-side gates that can stop Wallet enrollment before any request.
+enum DiagnosticWalletUnavailableReason: String, CaseIterable {
+  case subscriptionMissing = "subscription_missing"
+  case capabilitiesUnavailable = "capabilities_unavailable"
 }
 
 enum DiagnosticWalletValidationRule: String, CaseIterable {
