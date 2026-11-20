@@ -94,7 +94,9 @@ struct DiagnosticsStoreTests {
     #expect(unavailable.issueFingerprint == ["wallet.sync_unavailable", "subscription_missing"])
     #expect(unavailable.level == .error)
     #expect(!DiagnosticRecord.logMessages.contains(unavailable.message))
-  }  @Test func transactionIssueContainsOnlyFixedClassifications() {
+  }
+
+  @Test func transactionIssueContainsOnlyFixedClassifications() {
     let expectedFailures: [(DataFailure, String)] = [
       (.cancelled, "cancelled"), (.offline, "offline"), (.authentication, "authentication"),
       (.authorization, "authorization"), (.subscription, "subscription"),
