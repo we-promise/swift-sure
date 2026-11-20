@@ -42,7 +42,29 @@ struct PostHogConfigurationTests {
     #expect(!config.sessionReplay)
     #expect(!config.surveys)
     #expect(!config.preloadFeatureFlags)
+    #expect(config.personProfiles == .never)
     #expect(!config.debug)
+  }
+
+  @Test @MainActor func launchKeepsItsOwnEvent() {
+    let payload = PostHogAnalyticsClient.payload(for: .appOpened)
+    #expect(payload.name == "app_opened")
+    #expect(payload.properties.isEmpty)
+    #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: nil))
+  }
+
+  @Test(arguments: UsageScreen.allCases) @MainActor func screenUsesPostHogsStandardEvent(_ screen: UsageScreen) {
+    let payload = PostHogAnalyticsClient.payload(for: .screenViewed(screen))
+    #expect(payload.name == "$screen")
+    #expect(payload.properties == ["$screen_name": screen.rawValue])
+    #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: payload.properties["$screen_name"]))
+  }
+
+  @Test func rejectsLegacyAndUnexpectedScreenEvents() {
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "screen_viewed", screenName: "overview"))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$autocapture", screenName: "overview"))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$screen", screenName: nil))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$screen", screenName: "unexpected_screen"))
   }
   #endif
 }

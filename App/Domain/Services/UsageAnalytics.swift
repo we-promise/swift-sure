@@ -8,20 +8,6 @@ protocol UsageAnalytics: AnyObject {
 enum UsageEvent: Equatable {
   case appOpened
   case screenViewed(UsageScreen)
-
-  var name: String {
-    switch self {
-    case .appOpened: "app_opened"
-    case .screenViewed: "screen_viewed"
-    }
-  }
-
-  var properties: [String: String] {
-    switch self {
-    case .appOpened: [:]
-    case .screenViewed(let screen): ["screen": screen.rawValue]
-    }
-  }
 }
 
 enum UsageScreen: String, CaseIterable {

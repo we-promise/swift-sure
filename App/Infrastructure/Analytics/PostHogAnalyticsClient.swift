@@ -3,6 +3,7 @@ import PostHog
 
 @MainActor
 final class PostHogAnalyticsClient: AnalyticsClient {
+  private nonisolated static let screenNameProperty = "$screen_name"
   private let configuration: PostHogConfiguration
   private var sdk: PostHogSDK?
 
@@ -35,14 +36,16 @@ final class PostHogAnalyticsClient: AnalyticsClient {
     config.debug = false
     config.maxQueueSize = 100
     config.setBeforeSend { event in
-      guard event.event == "app_opened" || event.event == "screen_viewed" else { return nil }
+      let screenName = event.properties[Self.screenNameProperty] as? String
+      guard Self.allowsCapture(of: event.event, screenName: screenName) else { return nil }
       return event
     }
     return config
   }
 
   func capture(_ event: UsageEvent) {
-    sdk?.capture(event.name, properties: event.properties)
+    let payload = Self.payload(for: event)
+    sdk?.capture(payload.name, properties: payload.properties)
   }
 
   func resetIdentity() {
@@ -53,6 +56,28 @@ final class PostHogAnalyticsClient: AnalyticsClient {
     sdk?.optOut()
     sdk?.close()
     sdk = nil
+  }
+
+  static func payload(for event: UsageEvent) -> (name: String, properties: [String: String]) {
+    switch event {
+    case .appOpened:
+      (EventName.appOpened.rawValue, [:])
+    case .screenViewed(let screen):
+      (EventName.screen.rawValue, [screenNameProperty: screen.rawValue])
+    }
+  }
+
+  nonisolated static func allowsCapture(of name: String, screenName: String?) -> Bool {
+    switch EventName(rawValue: name) {
+    case .appOpened: true
+    case .screen: screenName.flatMap(UsageScreen.init(rawValue:)) != nil
+    case nil: false
+    }
+  }
+
+  private enum EventName: String {
+    case appOpened = "app_opened"
+    case screen = "$screen"
   }
 }
 #endif

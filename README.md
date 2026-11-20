@@ -203,9 +203,10 @@ and in already-released builds; resetting it under PostHog's **Project settings
 → Danger zone → Reset project API key** is what actually invalidates it, at the
 cost of silencing installed builds that still carry the old one.
 
-Events are `app_opened` (one per process launch) and `screen_viewed`, whose only
-app-defined property is a fixed `screen` value: `overview`, `assistant`,
-`accounts`, `budget`, `connection_settings`, `sign_in`, or `onboarding`.
+Sure sends `app_opened` once per process launch and PostHog’s standard `$screen`
+event for screen views. The only app-defined screen property is `$screen_name`,
+with a fixed value of `overview`, `assistant`, `accounts`, `budget`,
+`connection_settings`, `sign_in`, or `onboarding`.
 PostHog also supplies standard app/device/session metadata and an anonymous ID.
 No Sure IDs, server addresses, financial values, account/transaction details,
 credentials, or conversation text are passed to analytics. The app does not call
