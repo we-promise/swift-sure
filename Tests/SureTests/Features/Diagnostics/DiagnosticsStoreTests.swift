@@ -59,11 +59,12 @@ struct DiagnosticsStoreTests {
     }
     #expect(DiagnosticRecord.messages.contains(DiagnosticRecord.launched.message))
     #expect(DiagnosticRecord.logMessages.count == 2)
-    #expect(DiagnosticRecord.messages.count == 5)
+    #expect(DiagnosticRecord.messages.count == 6)
     let vocabulary = DiagnosticOperation.allCases.map(\.rawValue)
       + DiagnosticWalletOperation.allCases.map(\.rawValue)
       + DiagnosticWalletFailure.allCases.map(\.rawValue)
       + DiagnosticWalletValidationRule.allCases.map(\.rawValue)
+      + DiagnosticWalletUnavailableReason.allCases.map(\.rawValue)
       + Array(DiagnosticRecord.messages)
     for term in vocabulary {
       #expect(term == term.lowercased())
@@ -86,9 +87,14 @@ struct DiagnosticsStoreTests {
       "invalid_payload", "transaction.posted_at", "required_for_booked"])
     #expect(!DiagnosticRecord.logMessages.contains(budget.message))
     #expect(!DiagnosticRecord.logMessages.contains(wallet.message))
-  }
 
-  @Test func transactionIssueContainsOnlyFixedClassifications() {
+    let unavailable = DiagnosticRecord.walletSyncUnavailable(reason: .subscriptionMissing)
+    #expect(unavailable.message == "wallet.sync_unavailable")
+    #expect(unavailable.attributes == ["reason": "subscription_missing"])
+    #expect(unavailable.issueFingerprint == ["wallet.sync_unavailable", "subscription_missing"])
+    #expect(unavailable.level == .error)
+    #expect(!DiagnosticRecord.logMessages.contains(unavailable.message))
+  }  @Test func transactionIssueContainsOnlyFixedClassifications() {
     let expectedFailures: [(DataFailure, String)] = [
       (.cancelled, "cancelled"), (.offline, "offline"), (.authentication, "authentication"),
       (.authorization, "authorization"), (.subscription, "subscription"),
