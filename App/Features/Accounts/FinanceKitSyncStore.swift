@@ -17,6 +17,9 @@ final class FinanceKitSyncStore {
   private(set) var needsDisconnectRetry = false
   private let preferences: any FinanceKitSyncPreferences
   private(set) var state: State = .idle
+  /// Why the last enrollment attempt stopped at the availability gate. Kept
+  /// alongside `state` so the screen can explain an `.unavailable` result.
+  private(set) var unavailableReason: DiagnosticWalletUnavailableReason?
   private(set) var batchValidationIssue: FinanceKitEventValidationIssue?
   private(set) var batchRejection: FinanceKitBatchRejection?
   var rejectionMessage: String? {
@@ -117,6 +120,7 @@ final class FinanceKitSyncStore {
     enrollmentInProgress = true
     defer { enrollmentInProgress = false }
     state = .enrolling
+    unavailableReason = nil
     var createdConnectionID: UUID?
     do {
       // Durable configuration is authoritative, even before the first view refresh.
@@ -142,8 +146,17 @@ final class FinanceKitSyncStore {
             bookedBalance: .init(amount: amount, currency: balance.currency.rawValue,
               direction: decimal < 0 ? "debit" : "credit"), observedAt: moment))
       }
-      guard await entitlementExpiration() != nil, try await client.capabilities().available else {
-        state = .unavailable; return
+      guard await entitlementExpiration() != nil else {
+        unavailableReason = .subscriptionMissing
+        diagnostics?.log(.walletSyncUnavailable(reason: .subscriptionMissing))
+        state = .unavailable
+        return
+      }
+      guard try await client.capabilities().available else {
+        unavailableReason = .capabilitiesUnavailable
+        diagnostics?.log(.walletSyncUnavailable(reason: .capabilitiesUnavailable))
+        state = .unavailable
+        return
       }
       let connection = try await client.enroll(.init(enrollmentID: makeID(), consent: consent))
       createdConnectionID = connection.connectionID
@@ -256,7 +269,15 @@ final class FinanceKitSyncStore {
       state = .failed("Wallet uploads are stopped on this device. Retry to finish disconnecting from Sure; synchronized transactions will be kept.")
       return
     }
-    guard let connectionID = await publisher.configuredConnectionID() else { clearStatus(); return }
+    guard let connectionID = await publisher.configuredConnectionID() else {
+      // With no configured connection there is nothing to refresh into, and a
+      // terminal result the user has not acted on yet is the one thing worth
+      // keeping on screen. Refreshing must not erase it.
+      if case .failed = state { return }
+      if case .unavailable = state { return }
+      clearStatus()
+      return
+    }
     if preferences.consentAcknowledged == nil {
       consentAcknowledged = true
       preferences.consentAcknowledged = true
@@ -291,6 +312,7 @@ final class FinanceKitSyncStore {
 
   private func clearStatus() {
     health = nil
+    unavailableReason = nil
     batchValidationIssue = nil
     batchRejection = nil
     conflicts = []

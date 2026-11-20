@@ -1,13 +1,11 @@
 # FinanceKit device testing
 
-Use the `financekit-background-sync` branch for PR #16. The current feature is
-foreground Wallet sync; the background extension is not included in this branch.
-
 ## Build and install
 
 Generate the project, open `Sure.xcodeproj`, select the **Sure** scheme and your
-physical iPhone, and select your development team for both Sure and Sure Watch.
-Run from Xcode. Do not commit the generated project or local signing settings.
+physical iPhone, and select your development team for Sure, Sure Watch, and the
+FinanceKit background extension. Run from Xcode. Do not commit the generated
+project or local signing settings.
 
 ```sh
 xcodegen generate --spec Project.json
@@ -16,11 +14,12 @@ xcodebuild -project Sure.xcodeproj -scheme Sure -configuration Debug \
   DEVELOPMENT_TEAM='<your-team-id>' -allowProvisioningUpdates build
 ```
 
-The development profile for `am.sure.insights` must include FinanceKit
-`financial-data`, `group.am.sure.insights.financekit`, and the shared Keychain
-access group. A successful unsigned build alone does not validate provisioning.
-Xcode can refresh stale profiles when the capabilities are approved for the App
-ID. Check `NSFinancialDataUsageDescription` in the generated app plist as well.
+The FinanceKit capability is assigned to both the app and extension App IDs. Each
+provisioning profile must carry its target's FinanceKit entitlement; the app and
+extension also need their shared App Group and Keychain groups. A successful
+unsigned build alone does not validate provisioning or signing. Xcode can refresh
+stale profiles when the capabilities are enabled for the App IDs. Check
+`NSFinancialDataUsageDescription` in the generated app plist as well.
 
 Use an eligible iPhone on iOS 18 or later with authorized Wallet accounts. The
 app checks FinanceKit availability at runtime. Local Wallet preview remains free;
@@ -53,7 +52,32 @@ does not include these experimental endpoints.
    free local preview again.
 8. Let entitlement access lapse, then restore it. Downloaded records remain;
    connectivity suspends and resumes according to the verified entitlement.
+9. With signing and provisioning configured for both App IDs, test background
+   delivery on a physical iOS 26 device. Verify that recognized callbacks
+   trigger the existing sync path and that an unknown-only callback does not
+   start a full-history collection.
 
-Unattended, locked-device, and background-extension delivery are deferred to the
-separate background-entitlement work. These checks require actual Wallet/server
-interaction and are not claimed by simulator tests.
+Simulator tests do not establish signing, provisioning, signed archives, or
+physical-device delivery. Those checks require actual Wallet and server
+interaction and are not claimed by simulator tests. Unattended sync remains
+unverified until the prerequisites are met.
+
+## Generated configuration checks
+
+CI generates the Xcode project, builds the extension target unsigned for the
+iOS Simulator, and checks the generated extension bundle identifier, release
+version, and extension point. It also compares the App Group and Keychain group
+declarations for the app and extension. These checks validate generated
+configuration, not Apple entitlement approval or signing.
+
+The app and extension entitlement inputs are
+`App/iOS.entitlements` and
+`FinanceKitBackground/FinanceKitBackground.entitlements`. Keep their shared
+App Group and Keychain access group aligned with `Project.json` and the generated
+extension configuration.
+
+Background delivery must not be described as active without successful
+provisioning, signing, and physical-device checks. A simulator build or unit test
+is not evidence of unattended or locked-device delivery.
+
+<!-- Parent: FinanceKitSyncArchitecture.md -->

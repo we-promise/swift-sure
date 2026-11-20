@@ -32,6 +32,16 @@ struct FinanceKitSyncView: View {
             }
             Button("Repair Wallet sync") { Task { await sync.repair() } }
               .disabled(sync.isBusy)
+          case .unavailable:
+            if sync.unavailableReason == .subscriptionMissing {
+              Text("Wallet sync needs an active Sure subscription on this device.")
+                .foregroundStyle(.secondary)
+            } else {
+              Text("Wallet sync is unavailable right now. Try again later.")
+                .foregroundStyle(.secondary)
+            }
+            Button("Sync Wallet accounts to your Sure family") { Task { await sync.enroll(accounts: wallet.accounts) } }
+              .disabled(!sync.consentAcknowledged || sync.isBusy || wallet.accounts.isEmpty || wallet.state != .authorized)
           default:
             Button("Sync Wallet accounts to your Sure family") { Task { await sync.enroll(accounts: wallet.accounts) } }
               .disabled(!sync.consentAcknowledged || sync.isBusy || wallet.accounts.isEmpty || wallet.state != .authorized)

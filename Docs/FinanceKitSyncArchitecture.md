@@ -164,9 +164,9 @@ The foreground trigger requires FinanceKit availability and the
 `com.apple.developer.financekit` entitlement. This app supports iOS 18 or later;
 eligible accounts and regions are determined by FinanceKit at runtime. The
 foreground path does not require the separate background-delivery entitlement.
-The background-delivery extension is
-`@available(iOS 26.0, *)` and needs a FinanceKit background entitlement on a
-second App ID, so it lands separately.
+The background-delivery extension is `@available(iOS 26.0, *)` and uses its own
+App ID. FinanceKit is assigned to both App IDs. Signing and physical-device
+delivery have not been verified.
 
 A capture the server has accepted but not yet imported is reported as
 `FinanceKitSyncError.importPending`, distinct from `invalidReceipt`. The pending
@@ -221,17 +221,20 @@ The current slice implements the App Group/Keychain boundary, StoreKit and
 transport gates, exact outbox/receipt state machine, chunking, checkpoint
 custody, history collector, source fidelity, lifecycle suspension, cleanup, and
 the foreground trigger. It intentionally has no default publisher configuration
-until those activation gates are met. The background-delivery extension target
-is held on a separate branch until the Apple entitlement for
-`am.sure.insights.financekit-background` is granted; the App Group, Keychain
-access group, process lock, and file stores stay here so adding it back needs no
-migration on already-installed devices.
+until those activation gates are met. This change also adds the iOS 26
+background-delivery extension target. The FinanceKit capability is assigned to
+both the app and extension App IDs. The target's signing, archive, and detached
+physical-device delivery have not been verified; its iOS 26.0 deployment target
+does not constrain the foreground path. The extension adds a trigger and
+nothing else: `didReceiveData(for:)` calls the same `FinanceKitSyncRunner`.
 
 ## Experimental control plane
 
 The iOS settings surface exposes enrollment, selected-account mapping, activation, an explicit **Sync now**, health, conflict repair, credential renewal, and remote disconnect only when `FINANCEKIT_ENABLED` is compiled and the background-processing subscription entitlement is current. It shows the server's accepted and imported times separately rather than one "last synced": accepting a capture and importing it are different facts, and collapsing them would claim a freshness Sure cannot vouch for. The client keeps the Apple history checkpoint and durable capture until the server reports the final batch `applied`. A replacement device never guesses that a new device-scoped FinanceKit transaction UUID is an existing ledger transaction; the server quarantines it as a `replacement_identity` conflict for explicit review.
 
-This remains a device-only preview. There is no broad production rollout without the Apple background entitlement, Sure preview access, and explicit family-data consent.
+This remains a device-only preview. There is no broad production rollout without
+verified signing, physical-device background delivery, Sure preview access, and
+explicit family-data consent.
 
 
 ### Retrying disconnection after logout
