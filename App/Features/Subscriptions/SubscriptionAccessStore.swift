@@ -8,6 +8,7 @@ final class SubscriptionAccessStore {
   private(set) var accessEnd: Date?
   private(set) var renewalCancelled = false
   private(set) var message: String?
+  private(set) var checkoutStatus: CheckoutStatus?
   private(set) var isBusy = false
   private(set) var plans: [SubscriptionPlan] = []
   private var expiryTask: Task<Void, Never>?
@@ -44,6 +45,7 @@ final class SubscriptionAccessStore {
     accessEnd = entitlement?.expiration
     renewalCancelled = entitlement?.renewalCancelled ?? false
     isChecking = false
+    if hasAccess { checkoutStatus = nil }
     expiryTask?.cancel()
     if let end = entitlement?.expiration {
       let waitUntil = waitUntil
@@ -63,24 +65,42 @@ final class SubscriptionAccessStore {
     guard !isBusy else { return }
     isBusy = true
     message = nil
-    defer { isBusy = false }
+    checkoutStatus = nil
+    defer {
+      if hasAccess { checkoutStatus = nil }
+      isBusy = false
+    }
     do {
       switch try await service.purchase(plan.id) {
       case .completed: await refresh()
-      case .pending: message = String(localized: "Your purchase is awaiting approval. Backend sign-in remains locked.")
-      case .cancelled: break
+      case .pending: checkoutStatus = .pendingApproval
+      case .cancelled: checkoutStatus = .incomplete
       }
-    } catch { message = String(localized: "The purchase could not be verified or completed. Please try again.") }
+    } catch { checkoutStatus = .failed }
   }
 
   func restore() async {
     guard !isBusy else { return }
     isBusy = true
+    checkoutStatus = nil
+    message = nil
     defer { isBusy = false }
     do {
       try await service.restore()
       await refresh()
       message = hasAccess ? nil : String(localized: "No active subscription was found for this Apple Account.")
     } catch { message = String(localized: "Purchases could not be restored. Please try again.") }
+  }
+
+  enum CheckoutStatus: Equatable {
+    case incomplete, pendingApproval, failed
+
+    var text: LocalizedStringResource {
+      switch self {
+      case .incomplete: "Your purchase didn’t complete."
+      case .pendingApproval: "Your purchase is awaiting approval. Backend sign-in remains locked."
+      case .failed: "The purchase could not be verified or completed. Please try again."
+      }
+    }
   }
 }
