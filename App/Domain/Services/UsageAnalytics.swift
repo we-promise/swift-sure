@@ -8,6 +8,7 @@ protocol UsageAnalytics: AnyObject {
 enum UsageEvent: Equatable {
   case appOpened
   case screenViewed(UsageScreen)
+  case financeKitSync(FinanceKitSyncStage)
 }
 
 enum UsageScreen: String, CaseIterable {

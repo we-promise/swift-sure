@@ -8,6 +8,7 @@ struct AnalyticsStoreTests {
     let client = AnalyticsSpy()
     let store = AnalyticsStore(preferences: MemoryAnalyticsPreferences(), client: client)
     store.capture(.appOpened)
+    store.capture(.financeKitSync(.started))
     store.resetIdentity()
     #expect(!store.isEnabled)
     #expect(client.calls.isEmpty)

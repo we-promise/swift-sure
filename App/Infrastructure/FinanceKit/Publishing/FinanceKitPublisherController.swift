@@ -10,6 +10,7 @@ actor FinanceKitPublisherController: FinanceKitPublisherLifecycleHandling {
   )
 
   private let makeCollector: @Sendable () -> any FinanceKitChangeCollecting
+  private let syncTracking: FinanceKitSyncTracking
   private let remoteRenew: RemoteUpdate
   private let remoteRepair: RemoteUpdate
   private var gate: BackendAccessGate
@@ -19,6 +20,7 @@ actor FinanceKitPublisherController: FinanceKitPublisherLifecycleHandling {
 
   init(
     gate: BackendAccessGate,
+    syncTracking: FinanceKitSyncTracking = .init(),
     makeCollector: @escaping @Sendable () -> any FinanceKitChangeCollecting = { FinanceKitHistoryChangeCollector() },
     makeEnvironment: @escaping @Sendable () throws -> FinanceKitPublisherEnvironment = {
       try FinanceKitPublisherEnvironment.live()
@@ -31,6 +33,7 @@ actor FinanceKitPublisherController: FinanceKitPublisherLifecycleHandling {
     remoteDisconnect: @escaping @Sendable (FinanceKitDisconnectTarget) async throws -> Void = { _ in }
   ) {
     self.makeCollector = makeCollector
+    self.syncTracking = syncTracking
     self.remoteRenew = remoteRenew
     self.remoteRepair = remoteRepair
     self.gate = gate
@@ -213,7 +216,7 @@ actor FinanceKitPublisherController: FinanceKitPublisherLifecycleHandling {
         },
         processLock: FinanceKitProcessLock(url: environment.lockURL)
       )
-      _ = try await engine.synchronize()
+      _ = try await syncTracking.record { try await engine.synchronize() }
     } catch {
       // Background delivery can retry durable state; local Wallet access remains independent.
     }

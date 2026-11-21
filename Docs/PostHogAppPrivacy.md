@@ -8,8 +8,11 @@ App Privacy page: https://appstoreconnect.apple.com/apps/6804843427/distribution
 
 ## Implemented collection
 
-The app captures `app_opened` and PostHog’s standard `$screen` event. A screen
-event has one app-defined property, a fixed `$screen_name`. PostHog adds an
+The app captures `app_opened`, PostHog’s standard `$screen` event, and the
+app-initiated FinanceKit sync events `financekit_sync_started`,
+`financekit_sync_succeeded`, and `financekit_sync_failed`. The sync events
+carry only their fixed event names in the app-defined payload. A screen event
+has one app-defined property, a fixed `$screen_name`. PostHog adds an
 installation-scoped anonymous ID, session metadata, and standard app/device
 metadata (including app version, OS, model, screen dimensions, locale/time zone,
 and connectivity information).

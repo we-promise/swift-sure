@@ -60,6 +60,20 @@ struct PostHogConfigurationTests {
     #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: payload.properties["$screen_name"]))
   }
 
+  @Test @MainActor func financeKitSyncEventsHaveFixedNamesAndEmptyProperties() {
+    let names: [(FinanceKitSyncStage, String)] = [
+      (.started, "financekit_sync_started"),
+      (.succeeded, "financekit_sync_succeeded"),
+      (.failed, "financekit_sync_failed")
+    ]
+    for (stage, name) in names {
+      let payload = PostHogAnalyticsClient.payload(for: .financeKitSync(stage))
+      #expect(payload.name == name)
+      #expect(payload.properties.isEmpty)
+      #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: nil))
+    }
+  }
+
   @Test func rejectsLegacyAndUnexpectedScreenEvents() {
     #expect(!PostHogAnalyticsClient.allowsCapture(of: "screen_viewed", screenName: "overview"))
     #expect(!PostHogAnalyticsClient.allowsCapture(of: "$autocapture", screenName: "overview"))

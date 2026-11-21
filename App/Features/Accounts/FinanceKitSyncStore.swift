@@ -46,6 +46,7 @@ final class FinanceKitSyncStore {
   private let client: FinanceKitControlPlaneClient
   private let publisher: any FinanceKitPublisherLifecycleHandling
   private let diagnostics: (any DiagnosticsLogging)?
+  private let syncTracking: FinanceKitSyncTracking
   private let entitlementExpiration: @Sendable () async -> Date?
   private let makeID: @Sendable () -> UUID
   private let runSync: @Sendable (Set<FinanceKitBackgroundDataType>) async throws -> FinanceKitSyncOutcome
@@ -62,6 +63,7 @@ final class FinanceKitSyncStore {
   init(client: FinanceKitControlPlaneClient, publisher: any FinanceKitPublisherLifecycleHandling,
        preferences: any FinanceKitSyncPreferences,
        diagnostics: (any DiagnosticsLogging)? = nil,
+       syncTracking: FinanceKitSyncTracking = .init(),
        accountsDidChange: @escaping @MainActor () async -> Void = {},
        entitlementExpiration: @escaping @Sendable () async -> Date? = {
          await FinanceKitBackgroundEntitlementReader().expiration()
@@ -76,6 +78,7 @@ final class FinanceKitSyncStore {
     self.consentAcknowledged = preferences.consentAcknowledged ?? false
     self.needsDisconnectRetry = preferences.consentWithdrawalPending
     self.client = client; self.publisher = publisher; self.diagnostics = diagnostics
+    self.syncTracking = syncTracking
     self.entitlementExpiration = entitlementExpiration; self.makeID = makeID
     self.runSync = runSync; self.now = now
   }
@@ -193,7 +196,8 @@ final class FinanceKitSyncStore {
     isSyncing = true
     defer { isSyncing = false }
     do {
-      switch try await syncWithCredentialRecovery() {
+      let outcome = try await syncTracking.record { try await syncWithCredentialRecovery() }
+      switch outcome {
       case .repairRequired:
         localRepairRequired = true
         batchRejection = await publisher.batchRejection()

@@ -64,12 +64,18 @@ final class PostHogAnalyticsClient: AnalyticsClient {
       (EventName.appOpened.rawValue, [:])
     case .screenViewed(let screen):
       (EventName.screen.rawValue, [screenNameProperty: screen.rawValue])
+    case .financeKitSync(.started):
+      (EventName.financeKitSyncStarted.rawValue, [:])
+    case .financeKitSync(.succeeded):
+      (EventName.financeKitSyncSucceeded.rawValue, [:])
+    case .financeKitSync(.failed):
+      (EventName.financeKitSyncFailed.rawValue, [:])
     }
   }
 
   nonisolated static func allowsCapture(of name: String, screenName: String?) -> Bool {
     switch EventName(rawValue: name) {
-    case .appOpened: true
+    case .appOpened, .financeKitSyncStarted, .financeKitSyncSucceeded, .financeKitSyncFailed: true
     case .screen: screenName.flatMap(UsageScreen.init(rawValue:)) != nil
     case nil: false
     }
@@ -78,6 +84,9 @@ final class PostHogAnalyticsClient: AnalyticsClient {
   private enum EventName: String {
     case appOpened = "app_opened"
     case screen = "$screen"
+    case financeKitSyncStarted = "financekit_sync_started"
+    case financeKitSyncSucceeded = "financekit_sync_succeeded"
+    case financeKitSyncFailed = "financekit_sync_failed"
   }
 }
 #endif

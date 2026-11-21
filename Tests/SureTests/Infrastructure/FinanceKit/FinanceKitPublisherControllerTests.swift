@@ -4,6 +4,31 @@ import Testing
 
 @Suite("FinanceKit publisher lifecycle")
 struct FinanceKitPublisherControllerTests {
+  @Test @MainActor func startupTracksConfiguredSyncAttempts() async throws {
+    let environment = environment()
+    defer { try? FileManager.default.removeItem(at: environment.stateURL.deletingLastPathComponent()) }
+    let stateStore = FinanceKitPublisherStateFileStore(fileURL: environment.stateURL)
+    let gate = BackendAccessGate()
+    gate.update(expiration: .distantFuture)
+    let credentials = PublisherCredentials()
+    try credentials.removeAllCredentials()
+    let analytics = StartupSyncTrackingSpy()
+    let controller = FinanceKitPublisherController(gate: gate,
+      syncTracking: FinanceKitSyncTracking { analytics.stages.append($0) },
+      makeCollector: { UnexpectedPublisherCollector() },
+      makeEnvironment: { environment },
+      makeCredentialStore: { _ in credentials })
+
+    await controller.resumeIfConfigured()
+    #expect(analytics.stages.isEmpty)
+
+    var state = FinanceKitPublisherState.empty
+    state.configuration = try configuration()
+    try await stateStore.save(state)
+    await controller.resumeIfConfigured()
+    #expect(analytics.stages == [.started, .failed])
+  }
+
   @Test("Consent withdrawal fences uploads and preserves only retry metadata after a remote failure")
   func consentWithdrawalRetries() async throws {
     let environment = environment()
@@ -349,6 +374,11 @@ struct FinanceKitPublisherControllerTests {
     }
     return try decoder.decode(FinanceKitActivation.self, from: APIFixture.data(named: "financekit-activation")).configuration()
   }
+}
+
+@MainActor
+private final class StartupSyncTrackingSpy {
+  var stages: [FinanceKitSyncStage] = []
 }
 
 private final class PublisherCredentials: FinanceKitPublisherCredentialStoring, @unchecked Sendable {

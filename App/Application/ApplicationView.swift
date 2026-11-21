@@ -31,7 +31,7 @@ struct ApplicationView: View {
     let services = ConnectionAssembly()
     let devices = DeviceAssembly(connection: services)
     let finance = FinanceAssembly(
-      connection: services, diagnostics: diagnostics, syncInsights: devices.syncInsights
+      connection: services, analytics: analytics, diagnostics: diagnostics, syncInsights: devices.syncInsights
     )
     let lifecycle = services.lifecycle
     lifecycle.resetAppData = { try ApplicationDataResetter().reset() }

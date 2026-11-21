@@ -207,6 +207,11 @@ Sure sends `app_opened` once per process launch and PostHog’s standard `$scree
 event for screen views. The only app-defined screen property is `$screen_name`,
 with a fixed value of `overview`, `assistant`, `accounts`, `budget`,
 `connection_settings`, `sign_in`, or `onboarding`.
+The app sends `financekit_sync_started`, `financekit_sync_succeeded`, and
+`financekit_sync_failed` for app-initiated Wallet syncs. Each carries only its
+event name in the app-defined payload. A pass that finds no changes counts as
+a success. A deferred or cancelled pass can leave a start without a terminal
+event.
 PostHog also supplies standard app/device/session metadata and an anonymous ID.
 No Sure IDs, server addresses, financial values, account/transaction details,
 credentials, or conversation text are passed to analytics. The app does not call
