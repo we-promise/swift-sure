@@ -13,6 +13,7 @@ struct FinanceAssembly {
 
   init(
     connection services: ConnectionAssembly,
+    analytics: any UsageAnalytics,
     diagnostics: any DiagnosticsLogging,
     syncInsights: @escaping ([BackendInsight]) -> Void
   ) {
@@ -22,7 +23,8 @@ struct FinanceAssembly {
     let accessGate = services.accessGate
     let lifecycle = services.lifecycle
     let controlPlane = FinanceKitControlPlaneClient(transport: transport)
-    let financeKitPublisher = FinanceKitPublisherController(gate: accessGate,
+    let syncTracking = FinanceKitSyncTracking { analytics.capture(.financeKitSync($0)) }
+    let financeKitPublisher = FinanceKitPublisherController(gate: accessGate, syncTracking: syncTracking,
       remoteRenew: {
         let activation = try await controlPlane.renew(connectionID: $0)
         return (try activation.configuration(), activation.publisherCredential)
@@ -86,7 +88,7 @@ struct FinanceAssembly {
     self.financeKitPublisher = financeKitPublisher
     self.financeKitSync = FinanceKitSyncStore(client: controlPlane, publisher: financeKitPublisher,
       preferences: UserDefaultsFinanceKitSyncPreferences(defaults: .standard),
-      diagnostics: diagnostics,
+      diagnostics: diagnostics, syncTracking: syncTracking,
       accountsDidChange: { await financeData.refreshAccounts() })
     self.spendingComparison = spendingComparison
     self.transactionHistoryStoreFactory = transactionHistoryStoreFactory

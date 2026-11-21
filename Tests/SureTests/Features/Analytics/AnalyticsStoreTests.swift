@@ -8,6 +8,7 @@ struct AnalyticsStoreTests {
     let client = AnalyticsSpy()
     let store = AnalyticsStore(preferences: MemoryAnalyticsPreferences(), client: client)
     store.capture(.appOpened)
+    store.capture(.financeKitSync(.started))
     store.resetIdentity()
     #expect(!store.isEnabled)
     #expect(client.calls.isEmpty)
@@ -27,9 +28,9 @@ struct AnalyticsStoreTests {
     store.resetIdentity()
     store.setEnabled(false)
     #expect(!preferences.analyticsEnabled)
-    #expect(client.calls == ["start", "screen_viewed", "reset", "stop"])
+    #expect(client.calls == [.start, .capture(.screenViewed(.accounts)), .reset, .stop])
     store.setEnabled(true)
-    #expect(client.calls.last == "start")
+    #expect(client.calls.last == .start)
   }
 
   @Test func savedConsentIsRestored() {
@@ -38,7 +39,7 @@ struct AnalyticsStoreTests {
     let client = AnalyticsSpy()
     let store = AnalyticsStore(preferences: preferences, client: client)
     #expect(store.isEnabled)
-    #expect(client.calls == ["start"])
+    #expect(client.calls == [.start])
   }
 
   @Test func missingConfigurationRemainsDisabled() {
@@ -50,13 +51,6 @@ struct AnalyticsStoreTests {
     #expect(!store.isAvailable)
   }
 
-  @Test func eventVocabularyContainsOnlyUsage() {
-    #expect(UsageEvent.appOpened.properties.isEmpty)
-    for screen in UsageScreen.allCases {
-      #expect(UsageEvent.screenViewed(screen).properties == ["screen": screen.rawValue])
-    }
-  }
-
   @Test func identityRotatesOnlyAfterCommittedChanges() async {
     let client = AnalyticsSpy()
     let lifecycle = ApplicationConnectionLifecycle()
@@ -66,7 +60,7 @@ struct AnalyticsStoreTests {
     #expect(client.calls.isEmpty)
     await lifecycle.didCommitConnectionChange()
     lifecycle.didLogOut()
-    #expect(client.calls == ["reset", "reset"])
+    #expect(client.calls == [.reset, .reset])
   }
 }
 
@@ -77,9 +71,16 @@ private final class MemoryAnalyticsPreferences: AnalyticsPreferences {
 
 @MainActor
 private final class AnalyticsSpy: AnalyticsClient {
-  var calls: [String] = []
-  func start() { calls.append("start") }
-  func stop() { calls.append("stop") }
-  func capture(_ event: UsageEvent) { calls.append(event.name) }
-  func resetIdentity() { calls.append("reset") }
+  enum Call: Equatable {
+    case start
+    case stop
+    case capture(UsageEvent)
+    case reset
+  }
+
+  var calls: [Call] = []
+  func start() { calls.append(.start) }
+  func stop() { calls.append(.stop) }
+  func capture(_ event: UsageEvent) { calls.append(.capture(event)) }
+  func resetIdentity() { calls.append(.reset) }
 }

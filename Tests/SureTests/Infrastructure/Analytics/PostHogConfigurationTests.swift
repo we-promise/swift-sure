@@ -42,7 +42,43 @@ struct PostHogConfigurationTests {
     #expect(!config.sessionReplay)
     #expect(!config.surveys)
     #expect(!config.preloadFeatureFlags)
+    #expect(config.personProfiles == .never)
     #expect(!config.debug)
+  }
+
+  @Test @MainActor func launchKeepsItsOwnEvent() {
+    let payload = PostHogAnalyticsClient.payload(for: .appOpened)
+    #expect(payload.name == "app_opened")
+    #expect(payload.properties.isEmpty)
+    #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: nil))
+  }
+
+  @Test(arguments: UsageScreen.allCases) @MainActor func screenUsesPostHogsStandardEvent(_ screen: UsageScreen) {
+    let payload = PostHogAnalyticsClient.payload(for: .screenViewed(screen))
+    #expect(payload.name == "$screen")
+    #expect(payload.properties == ["$screen_name": screen.rawValue])
+    #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: payload.properties["$screen_name"]))
+  }
+
+  @Test @MainActor func financeKitSyncEventsHaveFixedNamesAndEmptyProperties() {
+    let names: [(FinanceKitSyncStage, String)] = [
+      (.started, "financekit_sync_started"),
+      (.succeeded, "financekit_sync_succeeded"),
+      (.failed, "financekit_sync_failed")
+    ]
+    for (stage, name) in names {
+      let payload = PostHogAnalyticsClient.payload(for: .financeKitSync(stage))
+      #expect(payload.name == name)
+      #expect(payload.properties.isEmpty)
+      #expect(PostHogAnalyticsClient.allowsCapture(of: payload.name, screenName: nil))
+    }
+  }
+
+  @Test func rejectsLegacyAndUnexpectedScreenEvents() {
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "screen_viewed", screenName: "overview"))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$autocapture", screenName: "overview"))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$screen", screenName: nil))
+    #expect(!PostHogAnalyticsClient.allowsCapture(of: "$screen", screenName: "unexpected_screen"))
   }
   #endif
 }

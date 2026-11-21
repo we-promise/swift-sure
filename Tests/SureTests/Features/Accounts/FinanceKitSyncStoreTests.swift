@@ -115,53 +115,76 @@ struct FinanceKitSyncStoreTests {
   @Test("Sync now collects everything since the checkpoint")
   func syncCollectsEverything() async throws {
     let recorder = SyncRecorder()
-    let store = makeStore(responses: Self.refreshResponses + Self.refreshResponses, recorder: recorder)
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: Self.refreshResponses + Self.refreshResponses,
+      recorder: recorder, syncTracking: analytics.tracking)
 
     await store.refresh()
     await store.sync()
 
     #expect(recorder.recordedCalls == [[]])
     #expect(store.state == .active)
+    #expect(analytics.stages == [.started, .succeeded])
   }
 
   @Test("A capture Sure has accepted but not imported reads as importing, not as a failure")
   func pendingImportIsNotAFailure() async throws {
     let recorder = SyncRecorder(result: { throw FinanceKitSyncError.importPending })
     let diagnostics = DiagnosticRecordSpy()
-    let store = makeStore(responses: Self.refreshResponses, recorder: recorder, diagnostics: diagnostics)
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: Self.refreshResponses, recorder: recorder,
+      diagnostics: diagnostics, syncTracking: analytics.tracking)
 
     await store.refresh()
     await store.sync()
 
     #expect(store.state == .importing)
     #expect(diagnostics.records.isEmpty)
+    #expect(analytics.stages == [.started])
   }
 
   @Test("Losing the process lock is not shown to the user as a failure")
   func lockContentionIsNotAFailure() async throws {
     let recorder = SyncRecorder(result: { throw FinanceKitProcessLockError.busy })
     let diagnostics = DiagnosticRecordSpy()
+    let analytics = SyncTrackingSpy()
     let store = makeStore(responses: Self.refreshResponses + Self.refreshResponses,
-      recorder: recorder, diagnostics: diagnostics)
+      recorder: recorder, diagnostics: diagnostics, syncTracking: analytics.tracking)
 
     await store.refresh()
     await store.sync()
 
     #expect(store.state == .active)
     #expect(diagnostics.records.isEmpty)
+    #expect(analytics.stages == [.started])
   }
 
   @Test("An unexpected failure is reported once the user can act on it")
   func unexpectedFailureIsReported() async throws {
     let recorder = SyncRecorder(result: { throw FinanceKitSyncError.invalidReceipt })
     let diagnostics = DiagnosticRecordSpy()
-    let store = makeStore(responses: Self.refreshResponses, recorder: recorder, diagnostics: diagnostics)
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: Self.refreshResponses, recorder: recorder,
+      diagnostics: diagnostics, syncTracking: analytics.tracking)
 
     await store.refresh()
     await store.sync()
 
     #expect(store.state == .failed("Wallet sync couldn’t finish. Try again."))
     #expect(diagnostics.records == [.walletSyncFailed(operation: .sync, failure: .invalidReceipt)])
+    #expect(analytics.stages == [.started, .failed])
+  }
+
+  @Test func cancelledSyncDoesNotEmitFailure() async {
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: Self.refreshResponses,
+      recorder: SyncRecorder(result: { throw URLError(.cancelled) }),
+      syncTracking: analytics.tracking)
+
+    await store.refresh()
+    await store.sync()
+
+    #expect(analytics.stages == [.started])
   }
 
   @Test("Validation code stays visible through refresh and foreground without another upload")
@@ -228,31 +251,37 @@ struct FinanceKitSyncStoreTests {
 
   @Test("Re-entering the foreground twice in a minute syncs once")
   func foregroundSyncIsDebounced() async throws {
-    let recorder = SyncRecorder()
+    let recorder = SyncRecorder(result: { .noChanges })
+    let analytics = SyncTrackingSpy()
     let clock = TestClock(Date(timeIntervalSince1970: 1_789_725_600))
     let store = makeStore(
       responses: Self.refreshResponses + Self.refreshResponses + Self.refreshResponses + Self.refreshResponses,
       recorder: recorder,
-      now: { clock.now }
+      now: { clock.now },
+      syncTracking: analytics.tracking
     )
 
     await store.syncOnForeground()
     await store.syncOnForeground()
     #expect(recorder.recordedCalls.count == 1)
+    #expect(analytics.stages == [.started, .succeeded])
 
     clock.advance(FinanceKitSyncStore.foregroundSyncInterval + 1)
     await store.syncOnForeground()
     #expect(recorder.recordedCalls.count == 2)
+    #expect(analytics.stages == [.started, .succeeded, .started, .succeeded])
   }
 
   @Test("A device that is not a configured publisher never reaches the runner")
   func unconfiguredDeviceDoesNotSync() async throws {
     let recorder = SyncRecorder()
-    let store = makeStore(responses: [], recorder: recorder, connectionID: nil)
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: [], recorder: recorder, connectionID: nil, syncTracking: analytics.tracking)
 
     await store.syncOnForeground()
 
     #expect(recorder.recordedCalls.isEmpty)
+    #expect(analytics.stages.isEmpty)
     #expect(store.state == .idle)
   }
 
@@ -269,11 +298,14 @@ struct FinanceKitSyncStoreTests {
 
   @Test("Local repair outcome survives a health refresh")
   func repairOutcomeIsVisible() async {
-    let store = makeStore(responses: Self.refreshResponses, recorder: SyncRecorder(result: { .repairRequired }))
+    let analytics = SyncTrackingSpy()
+    let store = makeStore(responses: Self.refreshResponses, recorder: SyncRecorder(result: { .repairRequired }),
+      syncTracking: analytics.tracking)
     await store.refresh()
     await store.sync()
     await store.refresh()
     #expect(store.state == .repairRequired)
+    #expect(analytics.stages == [.started, .failed])
   }
 
   @Test("Missing configuration clears previously displayed health")
@@ -414,17 +446,20 @@ struct FinanceKitSyncStoreTests {
   @Test("Publisher authorization recovers once and never loops", arguments: [false, true])
   func rejectedPublisherRecovery(alwaysReject: Bool) async throws {
     let attempts = PublisherSyncAttempts(alwaysReject: alwaysReject)
+    let analytics = SyncTrackingSpy()
     let publisher = FinanceKitPublisherStub(connectionID: Self.connection)
     let transport = HTTPDataTransportStub(Self.refreshResponses + Self.refreshResponses)
     let store = FinanceKitSyncStore(client: FinanceKitControlPlaneClient(transport: SureAPITransport(
       baseURL: URL(string: "https://sure.example")!, dataTransport: transport,
       authorizer: UnauthenticatedRequestAuthorizer())), publisher: publisher, preferences: TestSyncPreferences(true),
+      syncTracking: analytics.tracking,
       runSync: { _ in try await attempts.run() })
     await store.refresh()
     await store.sync()
     #expect(await attempts.count == 2)
     #expect(await publisher.renewals == 1)
     #expect(await transport.requests().allSatisfy { $0.httpMethod == "GET" })
+    #expect(analytics.stages == [.started, alwaysReject ? .failed : .succeeded])
     if alwaysReject {
       #expect(store.state == .failed("Wallet sync couldn’t finish. Try again."))
     } else {
@@ -561,7 +596,8 @@ struct FinanceKitSyncStoreTests {
     recorder: SyncRecorder,
     connectionID: UUID? = FinanceKitSyncStoreTests.connection,
     now: @escaping @Sendable () -> Date = { .now },
-    diagnostics: (any DiagnosticsLogging)? = nil
+    diagnostics: (any DiagnosticsLogging)? = nil,
+    syncTracking: FinanceKitSyncTracking = .init()
   ) -> FinanceKitSyncStore {
     let transport = SureAPITransport(
       baseURL: URL(string: "https://sure.example")!,
@@ -572,10 +608,17 @@ struct FinanceKitSyncStoreTests {
       client: FinanceKitControlPlaneClient(transport: transport),
       publisher: FinanceKitPublisherStub(connectionID: connectionID), preferences: TestSyncPreferences(true),
       diagnostics: diagnostics,
+      syncTracking: syncTracking,
       runSync: { try recorder.run($0) },
       now: now
     )
   }
+}
+
+@MainActor
+private final class SyncTrackingSpy {
+  private(set) var stages: [FinanceKitSyncStage] = []
+  var tracking: FinanceKitSyncTracking { FinanceKitSyncTracking { self.stages.append($0) } }
 }
 
 private actor FinanceKitPublisherStub: FinanceKitPublisherLifecycleHandling {
