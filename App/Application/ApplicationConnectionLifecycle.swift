@@ -6,6 +6,7 @@ final class ApplicationConnectionLifecycle: SureConnectionLifecycleHandling {
   weak var diagnostics: (any DiagnosticsLogging)?
   private(set) var dataCleanupFailure: DataFailure?
   var clearOfflineResponses: () async throws -> Void = {}
+  var clearAssistantHistory: () async throws -> Void = {}
   var resetAppData: () throws -> Void = {}
   weak var notificationLifecycle: (any AuthenticationNotificationLifecycle)?
   weak var financeData: FinanceDataStore?
@@ -60,10 +61,12 @@ final class ApplicationConnectionLifecycle: SureConnectionLifecycleHandling {
 
   func prepareForLogout() async {
     dataCleanupFailure = nil
+    financeData?.disconnect()
+    do { try await clearAssistantHistory() }
+    catch { reportCleanupFailure(.appDataReset) }
     await clearDownloadedData()
     await clearFinanceKitPublisher()
     clearLocalData()
-    financeData?.disconnect()
     await notificationLifecycle?.prepareForLogout()
   }
 

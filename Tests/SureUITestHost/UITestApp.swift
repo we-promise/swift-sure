@@ -44,7 +44,8 @@ struct UITestApp: App {
         credentials: StoredCredentialSnapshot(session: nil),
         isExplicitlySignedOut: true, requestContext: nil, initializationError: nil
       ),
-      authentication: FixtureAuthentication(canLogOut: scenario == "settings-locked", requiresSecondFactor: scenario.hasPrefix("sign-in-mfa"))
+      authentication: FixtureAuthentication(canLogOut: scenario == "settings-locked", requiresSecondFactor: scenario.hasPrefix("sign-in-mfa"),
+        connected: scenario == "assistant-history")
     )
     telemetryBuildDetails = TelemetryBuildDetails(
       postHogProjectToken: "phc_ui_fixture",
@@ -59,6 +60,8 @@ struct UITestApp: App {
         FixtureInsightTabs(finance: finance, client: client)
         .preferredColorScheme(scenario.hasSuffix("dark") ? .dark : .light)
         .task { await finance.refresh() }
+      } else if scenario == "assistant-history" {
+        FixtureAssistantTabs(connection: sureConnection)
       } else if scenario.hasPrefix("connection-routing") {
         FixtureConnectionRouting(subscriptionAccess: subscriptionAccess, connection: sureConnection,
           hasSyncAccess: scenario == "connection-routing")
@@ -104,6 +107,25 @@ struct UITestApp: App {
         }
       }
     }
+  }
+}
+
+private struct FixtureAssistantTabs: View {
+  var connection: SureConnection
+  @State private var selection: AppSection = .assistant
+
+  var body: some View {
+    TabView(selection: $selection) {
+      Tab("Overview", systemImage: "rectangle.grid.2x2.fill", value: .overview) {
+        Text("Overview fixture")
+      }
+      Tab("Assistant", systemImage: "sparkles", value: .assistant) {
+        AssistantView(connection: connection, remoteAssistant: FixtureRemoteAssistant(), localAssistant: FixtureLocalAssistant(),
+          localHistory: FixtureAssistantHistory(), makeMessageID: { UUID() }, now: { FixtureClient.date })
+      }
+    }
+    .tabViewStyle(.sidebarAdaptable)
+    .modifier(TabSwipeNavigationModifier { selection = selection.moving(by: $0) })
   }
 }
 
@@ -216,18 +238,20 @@ private final class FixtureDiagnostics: DiagnosticsControlling {
 private final class FixtureAuthentication: ConnectionAuthenticating {
   private(set) var status: ConnectionStatus = .notConnected
   var pendingOnboarding: MobileSSOOnboardingContext? { nil }
-  var isConfigured: Bool { false }
-  var isSignedOut: Bool { true }
+  var isConfigured: Bool { connected }
+  var isSignedOut: Bool { !connected }
   var generation: Int { 0 }
   private(set) var canLogOut: Bool
   var requiresSecondFactor: Bool
-  init(canLogOut: Bool = false, requiresSecondFactor: Bool = false) {
+  private let connected: Bool
+  init(canLogOut: Bool = false, requiresSecondFactor: Bool = false, connected: Bool = false) {
     self.canLogOut = canLogOut
     self.requiresSecondFactor = requiresSecondFactor
+    self.connected = connected
   }
   var allowsWalletPreview: Bool { false }
-  var connectionID: String? { nil }
-  var serverURL: URL? { nil }
+  var connectionID: String? { connected ? "assistant-history-fixture" : nil }
+  var serverURL: URL? { connected ? SureDemoServer.baseURL : nil }
   var isOAuthConnected: Bool { false }
   func matchesStoredAPIKey(_ key: String) -> Bool { false }
   func signIn(_ method: AuthenticationMethod, serverURL: String) async {

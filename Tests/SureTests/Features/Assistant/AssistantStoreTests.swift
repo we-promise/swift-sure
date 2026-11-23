@@ -87,6 +87,76 @@ struct AssistantStoreTests {
     ])
   }
 
+  @Test("Previously saved on-device chats reopen newest first without Sure")
+  func localConversationHistory() async throws {
+    let history = TestLocalAssistantHistory()
+    let connection = AssistantConnectionStub(isConfigured: false)
+    let store = makeStore(connection: connection, localHistory: history)
+    store.draft = "First local chat"
+    await store.send(to: .localModel)
+    store.startNewConversation()
+    store.draft = "Second local chat"
+    await store.send(to: .localModel)
+    store.startNewConversation()
+
+    let reopened = makeStore(connection: connection, localHistory: history)
+    await reopened.refreshHistory()
+    #expect(reopened.localConversations.map(\.conversation.title) == ["Second local chat", "First local chat"])
+    let first = try #require(reopened.localConversations.last)
+    reopened.selectLocalConversation(first)
+    #expect(reopened.selectedLocalConversationID == first.conversation.id)
+    #expect(reopened.messages.suffix(2).map(\.content) == ["First local chat", "Local answer"])
+    reopened.draft = "First chat follow-up"
+    await reopened.send(to: .localModel)
+
+    let saved = try #require(reopened.localConversations.first { $0.conversation.id == first.conversation.id })
+    #expect(reopened.localConversations.count == 2)
+    #expect(saved.messages.map(\.content) == ["First local chat", "Local answer", "First chat follow-up", "Local answer"])
+  }
+
+  @Test("Switching destinations keeps the saved transcripts separate")
+  func historyDestinations() async throws {
+    let remote = RemoteAssistantSpy()
+    let history = TestLocalAssistantHistory()
+    let store = makeStore(connection: AssistantConnectionStub(isConfigured: true), remoteAssistant: remote, localHistory: history)
+    store.draft = "Private question"
+    await store.send(to: .localModel)
+    store.draft = "Server question"
+    await store.send(to: .sureServer)
+    store.draft = "Another private question"
+    await store.send(to: .localModel)
+
+    #expect(await remote.snapshot().messages == ["Server question"])
+    #expect(store.conversations.map(\.title) == ["Server question"])
+    let local = await history.load(scope: nil)
+    #expect(Set(local.map(\.conversation.title)) == ["Private question", "Another private question"])
+    #expect(!local.flatMap(\.messages).contains { $0.content.contains("Server question") })
+  }
+
+  @Test("Signing in keeps standalone chats visible and isolates connected history")
+  func localHistoryConnectionScope() async throws {
+    let history = TestLocalAssistantHistory()
+    let disconnected = makeStore(connection: AssistantConnectionStub(isConfigured: false), localHistory: history)
+    disconnected.draft = "Standalone question"
+    await disconnected.send(to: .localModel)
+
+    let connected = makeStore(connection: AssistantConnectionStub(isConfigured: true), localHistory: history,
+      historyScope: "sure-account-one")
+    await connected.refreshHistory()
+    let standalone = try #require(connected.localConversations.first)
+    connected.selectLocalConversation(standalone)
+    connected.draft = "Follow-up with synced data"
+    await connected.send(to: .localModel)
+    await connected.refreshHistory()
+    #expect(connected.localConversations.count == 1)
+    #expect(connected.localConversations.first?.messages.contains { $0.content == "Follow-up with synced data" } == true)
+
+    let differentAccount = makeStore(connection: AssistantConnectionStub(isConfigured: true), localHistory: history,
+      historyScope: "sure-account-two")
+    await differentAccount.refreshHistory()
+    #expect(differentAccount.localConversations.first?.messages.map(\.content) == ["Standalone question", "Local answer"])
+  }
+
   @Test("New remote chats use an abbreviated prompt title")
   func remoteChatTitle() async throws {
     let remote = RemoteAssistantSpy()
@@ -111,6 +181,7 @@ struct AssistantStoreTests {
       connection: AssistantConnectionStub(isConfigured: true),
       remoteAssistant: RemoteAssistantSpy(),
       localAssistant: LocalAssistantStub(response: "Local answer"),
+      localHistory: TestLocalAssistantHistory(), historyScope: { nil },
       makeID: values.makeID,
       now: values.now
     )
@@ -153,6 +224,7 @@ struct AssistantStoreTests {
       connection: AssistantConnectionStub(isConfigured: true),
       remoteAssistant: RemoteAssistantSpy(),
       localAssistant: FailingLocalAssistantStub(),
+      localHistory: TestLocalAssistantHistory(), historyScope: { nil },
       makeID: values.makeID,
       now: values.now
     )
@@ -173,6 +245,7 @@ struct AssistantStoreTests {
       connection: connection,
       remoteAssistant: remote,
       localAssistant: LocalAssistantStub(response: "Local answer"),
+      localHistory: TestLocalAssistantHistory(), historyScope: { nil },
       makeID: values.makeID,
       now: values.now
     )
@@ -202,6 +275,7 @@ struct AssistantStoreTests {
       connection: connection,
       remoteAssistant: remote,
       localAssistant: LocalAssistantStub(response: "Local answer"),
+      localHistory: TestLocalAssistantHistory(), historyScope: { nil },
       makeID: values.makeID,
       now: values.now
     )
@@ -232,16 +306,31 @@ struct AssistantStoreTests {
   private func makeStore(
     connection: AssistantConnectionStub,
     remoteAssistant: RemoteAssistantSpy = RemoteAssistantSpy(),
-    localResponse: String = "Local answer"
+    localResponse: String = "Local answer",
+    localHistory: TestLocalAssistantHistory = TestLocalAssistantHistory(),
+    historyScope: String? = nil
   ) -> AssistantStore {
     let values = AssistantMessageValues()
     return AssistantStore(
       connection: connection,
       remoteAssistant: remoteAssistant,
       localAssistant: LocalAssistantStub(response: localResponse),
+      localHistory: localHistory, historyScope: { historyScope },
       makeID: values.makeID,
       now: values.now
     )
+  }
+}
+
+private actor TestLocalAssistantHistory: LocalAssistantHistory {
+  private var details: [String?: [AssistantConversationDetail]] = [:]
+
+  func load(scope: String?) -> [AssistantConversationDetail] { details[scope, default: []] }
+  func lease() -> Int { 0 }
+
+  func save(_ detail: AssistantConversationDetail, scope: String?, lease: Int) {
+    details[scope, default: []].removeAll { $0.conversation.id == detail.conversation.id }
+    details[scope, default: []].append(detail)
   }
 }
 

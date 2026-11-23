@@ -19,13 +19,17 @@ struct ApplicationView: View {
   private var oauthService: PasskeyOAuthService
   private var mobileSSOService: MobileSSOAuthService
   private var remoteAssistant: any RemoteAssistantClient
+  private var localAssistantHistory: any LocalAssistantHistory
   private var financeKitPublisher: any FinanceKitPublisherLifecycleHandling
   @State private var financeKitSync: FinanceKitSyncStore
   private var transactionHistoryStoreFactory: TransactionHistoryStoreFactory
   private var localTransactionHistoryStoreFactory: TransactionHistoryStoreFactory
   private var makeFirstRun: () -> FirstRunStore?
 
-  init(configureNotifications: (NotificationManager, BackendAccessGate) -> Void = { _, _ in }) {
+  init(
+    localAssistantHistory: LocalAssistantHistoryFile,
+    configureNotifications: (NotificationManager, BackendAccessGate) -> Void = { _, _ in }
+  ) {
     let analytics = AnalyticsAssembly.make()
     let diagnostics = DiagnosticsAssembly.make()
     let services = ConnectionAssembly()
@@ -35,6 +39,7 @@ struct ApplicationView: View {
     )
     let lifecycle = services.lifecycle
     lifecycle.resetAppData = { try ApplicationDataResetter().reset() }
+    lifecycle.clearAssistantHistory = { try await localAssistantHistory.removeAll() }
     lifecycle.analytics = analytics
     lifecycle.diagnostics = diagnostics
     lifecycle.notificationLifecycle = devices.notifications
@@ -63,6 +68,7 @@ struct ApplicationView: View {
     oauthService = services.oauthService
     mobileSSOService = services.mobileSSOService
     remoteAssistant = finance.remoteAssistant
+    self.localAssistantHistory = localAssistantHistory
     financeKitPublisher = finance.financeKitPublisher
     transactionHistoryStoreFactory = finance.transactionHistoryStoreFactory
     localTransactionHistoryStoreFactory = finance.localTransactionHistoryStoreFactory
@@ -85,6 +91,7 @@ struct ApplicationView: View {
         financeKitSync: financeKitSync,
         notificationManager: notificationManager,
         remoteAssistant: remoteAssistant,
+        localAssistantHistory: localAssistantHistory,
         transactionHistoryStoreFactory: transactionHistoryStoreFactory,
         localTransactionHistoryStoreFactory: localTransactionHistoryStoreFactory,
         makeAssistantMessageID: { UUID() },

@@ -13,6 +13,7 @@ struct ContentView: View {
   var financeKitSync: FinanceKitSyncStore
   var notificationManager: any InsightNotificationControlling
   var remoteAssistant: any RemoteAssistantClient
+  var localAssistantHistory: any LocalAssistantHistory
   var transactionHistoryStoreFactory: TransactionHistoryStoreFactory
   var localTransactionHistoryStoreFactory: TransactionHistoryStoreFactory
   var makeAssistantMessageID: () -> UUID
@@ -94,8 +95,9 @@ struct ContentView: View {
       Tab("Assistant", systemImage: "sparkles", value: .assistant) {
         AssistantView(
           connection: connection,
-          financeData: financeData,
           remoteAssistant: remoteAssistant,
+          localAssistant: LocalAssistantService(financeData: financeData),
+          localHistory: localAssistantHistory,
           makeMessageID: makeAssistantMessageID,
           now: now
         )

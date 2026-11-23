@@ -2,6 +2,10 @@ import SwiftUI
 
 @main
 struct AppDefinition: App {
+  private let localAssistantHistory = LocalAssistantHistoryFile(
+    directory: URL.applicationSupportDirectory.appending(path: "am.sure.insights/assistant-history")
+  )
+
   #if os(iOS)
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   #endif
@@ -13,7 +17,7 @@ struct AppDefinition: App {
       if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || NSClassFromString("XCTestCase") != nil {
         Color.clear
       } else {
-        ApplicationView { notifications, gate in
+        ApplicationView(localAssistantHistory: localAssistantHistory) { notifications, gate in
           #if os(iOS)
           appDelegate.notificationEventHandler = notifications
           appDelegate.canReceiveBackendNotifications = { gate.isAllowed }

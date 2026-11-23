@@ -1,13 +1,9 @@
 import Foundation
 
-struct AssistantConversation: Codable, Equatable, Identifiable {
+struct AssistantConversation: Codable, Equatable, Identifiable, Sendable {
   var id: UUID
   var title: String
   var updatedAt: Date
-
-  func abridgedTitle(limit: Int = 32) -> String {
-    Self.abridgedTitle(title, limit: limit)
-  }
 
   static func abridgedTitle(_ title: String, limit: Int) -> String {
     let normalized = title
