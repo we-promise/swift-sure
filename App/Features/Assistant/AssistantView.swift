@@ -6,13 +6,15 @@ struct AssistantView: View {
   @Environment(\.showConnectionSettings) private var showConnectionSettings
   var connection: SureConnection
   @State private var store: AssistantStore
+  @State private var isShowingConversations = false
   @State private var sureSendHaptic = 0
   @State private var didLongPressSend = false
 
   init(
     connection: SureConnection,
-    financeData: FinanceDataStore,
     remoteAssistant: any RemoteAssistantClient,
+    localAssistant: any LocalAssistantResponding,
+    localHistory: any LocalAssistantHistory,
     makeMessageID: @escaping () -> UUID,
     now: @escaping () -> Date
   ) {
@@ -21,7 +23,13 @@ struct AssistantView: View {
       initialValue: AssistantStore(
         connection: connection,
         remoteAssistant: remoteAssistant,
-        localAssistant: LocalAssistantService(financeData: financeData),
+        localAssistant: localAssistant,
+        localHistory: localHistory,
+        historyScope: {
+          guard let server = connection.connectedServerURL,
+                let identity = connection.connectedSnapshotIdentity else { return nil }
+          return server.absoluteString + "\n" + identity
+        },
         makeID: makeMessageID,
         now: now
       )
@@ -52,10 +60,12 @@ struct AssistantView: View {
               .padding(.bottom)
               .padding(.top, -9)
             }
-            .onChange(of: store.messages.count) {
-              if let last = store.messages.last {
-                scroll(proxy, to: last.id)
-              }
+            #if os(iOS)
+            .scrollDismissesKeyboard(.immediately)
+            #endif
+            .accessibilityIdentifier("assistant-transcript")
+            .onChange(of: store.messages.last?.id) { _, current in
+              if let current { scroll(proxy, to: current) }
             }
             .onChange(of: store.isResponding) { _, isResponding in
               guard isResponding else { return }
@@ -72,14 +82,18 @@ struct AssistantView: View {
       #endif
       .toolbar {
         ToolbarItemGroup(placement: .primaryAction) {
-          conversationMenu
+          Button("Conversations", systemImage: "bubble.left.and.bubble.right") {
+            isShowingConversations = true
+          }
+          .labelStyle(.iconOnly)
+          .accessibilityHint("Choose a previous Assistant conversation or start a new one")
           Button("Settings", systemImage: "gearshape") {
             showConnectionSettings()
           }
         }
       }
-      .task(id: connection.sessionGeneration) {
-        await store.reloadConversationsForCurrentSession()
+      .sheet(isPresented: $isShowingConversations) {
+        AssistantHistoryView(store: store, isConnected: connection.isConfigured)
       }
     }
   }
@@ -91,46 +105,6 @@ struct AssistantView: View {
         .accessibilityAddTraits(.isHeader)
       Spacer()
     }
-  }
-
-  private var conversationMenu: some View {
-    Menu {
-      Button("New Conversation", systemImage: "square.and.pencil") {
-        store.startNewConversation()
-      }
-      .disabled(store.isResponding)
-
-      Divider()
-
-      if store.isLoadingConversations {
-        Label("Loading conversations…", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
-      } else if let conversationErrorMessage = store.conversationErrorMessage {
-        Text(conversationErrorMessage)
-        Button("Try Again", systemImage: "arrow.clockwise") {
-          Task { await store.refreshConversations() }
-        }
-      } else if store.conversations.isEmpty {
-        Text(connection.isConfigured ? "No saved conversations" : "Connect to Sure to load conversations")
-      } else {
-        ForEach(store.conversations) { conversation in
-          Button {
-            Task { await store.selectConversation(conversation) }
-          } label: {
-            Label(
-              conversation.abridgedTitle(),
-              systemImage: conversation.id == store.selectedConversationID ? "checkmark" : "bubble.left"
-            )
-          }
-          .disabled(store.isResponding || store.isLoadingConversation)
-          .accessibilityLabel(conversation.title)
-          .help(conversation.title)
-        }
-      }
-    } label: {
-      Label("Conversations", systemImage: "bubble.left.and.bubble.right")
-        .labelStyle(.iconOnly)
-    }
-    .accessibilityHint("Choose a previous Assistant conversation or start a new one")
   }
 
   private var suggestionCard: some View {
@@ -231,6 +205,7 @@ struct AssistantView: View {
       TextField("Ask about your finances", text: $store.draft, axis: .vertical)
         .lineLimit(1...5)
         .textFieldStyle(.plain)
+        .accessibilityIdentifier("assistant-composer")
         .padding(12)
         .background(.background, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onSubmit { submit(to: .localModel) }

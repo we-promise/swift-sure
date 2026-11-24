@@ -1,137 +1,68 @@
 import SwiftUI
 
-#if os(iOS)
-import UIKit
-#endif
-
 struct ApplicationView: View {
-  @State private var subscriptionAccess: SubscriptionAccessStore
   @Environment(\.scenePhase) private var scenePhase
-  @State private var connection: SureConnection
-  @State private var financeData: FinanceDataStore
-  @State private var spendingComparison: SpendingComparisonStore
-  @State private var appleCardConnection: AppleCardConnectionStore
   @State private var firstRun: FirstRunStore?
-  private var analytics: AnalyticsStore
-  private var telemetryBuildDetails: TelemetryBuildDetails
-  private var diagnostics: DiagnosticsStore
-  private var notificationManager: NotificationManager
-  private var oauthService: PasskeyOAuthService
-  private var mobileSSOService: MobileSSOAuthService
-  private var remoteAssistant: any RemoteAssistantClient
-  private var financeKitPublisher: any FinanceKitPublisherLifecycleHandling
-  @State private var financeKitSync: FinanceKitSyncStore
-  private var transactionHistoryStoreFactory: TransactionHistoryStoreFactory
-  private var localTransactionHistoryStoreFactory: TransactionHistoryStoreFactory
-  private var makeFirstRun: () -> FirstRunStore?
+  private let assembly: ApplicationAssembly
 
-  init(configureNotifications: (NotificationManager, BackendAccessGate) -> Void = { _, _ in }) {
-    let analytics = AnalyticsAssembly.make()
-    let diagnostics = DiagnosticsAssembly.make()
-    let services = ConnectionAssembly()
-    let devices = DeviceAssembly(connection: services)
-    let finance = FinanceAssembly(
-      connection: services, analytics: analytics, diagnostics: diagnostics, syncInsights: devices.syncInsights
-    )
-    let lifecycle = services.lifecycle
-    lifecycle.resetAppData = { try ApplicationDataResetter().reset() }
-    lifecycle.analytics = analytics
-    lifecycle.diagnostics = diagnostics
-    lifecycle.notificationLifecycle = devices.notifications
-    lifecycle.financeData = finance.financeData
-    lifecycle.financeKitSync = finance.financeKitSync
-    lifecycle.spendingComparison = finance.spendingComparison
-    lifecycle.appleCardConnection = finance.appleCardConnection
-    lifecycle.financeKitPublisher = finance.financeKitPublisher
-    lifecycle.transactionHistoryFactories = [finance.transactionHistoryStoreFactory, finance.localTransactionHistoryStoreFactory]
-    lifecycle.restoreInitialState(isExplicitlySignedOut: services.initialState.isExplicitlySignedOut)
-    _firstRun = State(initialValue: FirstRunAssembly(connection: services, finance: finance).store)
-    makeFirstRun = { FirstRunAssembly(connection: services, finance: finance).store }
-    _subscriptionAccess = State(initialValue: services.subscriptionAccess)
-    _connection = State(initialValue: services.connection)
-    _financeData = State(initialValue: finance.financeData)
-    _spendingComparison = State(initialValue: finance.spendingComparison)
-    _appleCardConnection = State(initialValue: finance.appleCardConnection)
-    _financeKitSync = State(initialValue: finance.financeKitSync)
-    self.analytics = analytics
-    telemetryBuildDetails = TelemetryBuildDetails(
-      postHogProjectToken: PostHogConfiguration(bundle: .main)?.projectToken,
-      sentryDSN: SentryDiagnosticsConfiguration(bundle: .main)?.dsn
-    )
-    self.diagnostics = diagnostics
-    notificationManager = devices.notifications
-    oauthService = services.oauthService
-    mobileSSOService = services.mobileSSOService
-    remoteAssistant = finance.remoteAssistant
-    financeKitPublisher = finance.financeKitPublisher
-    transactionHistoryStoreFactory = finance.transactionHistoryStoreFactory
-    localTransactionHistoryStoreFactory = finance.localTransactionHistoryStoreFactory
-    configureNotifications(devices.notifications, services.accessGate)
-    devices.activate()
+  init(
+    assembly: ApplicationAssembly,
+    configureNotifications: (NotificationManager, BackendAccessGate) -> Void
+  ) {
+    self.assembly = assembly
+    _firstRun = State(initialValue: assembly.makeFirstRun())
+    configureNotifications(assembly.notifications, assembly.connection.accessGate)
   }
 
   var body: some View {
-    Group {
-      ContentView(
-        subscriptionAccess: subscriptionAccess,
-        connection: connection,
-        analytics: analytics,
-        telemetryBuildDetails: telemetryBuildDetails,
-        diagnostics: diagnostics,
-        financeData: financeData,
-        spendingComparison: spendingComparison,
-        appleCardConnection: appleCardConnection,
-        firstRun: firstRun,
-        financeKitSync: financeKitSync,
-        notificationManager: notificationManager,
-        remoteAssistant: remoteAssistant,
-        transactionHistoryStoreFactory: transactionHistoryStoreFactory,
-        localTransactionHistoryStoreFactory: localTransactionHistoryStoreFactory,
-        makeAssistantMessageID: { UUID() },
-        now: { .now }
-      )
-      .task { await subscriptionAccess.monitor() }
-      .task(id: scenePhase) {
-        guard scenePhase == .active else { return }
-        await appleCardConnection.refresh()
-      }
-      .onChange(of: scenePhase) { _, phase in
-        if phase == .active {
-          Task {
-            await subscriptionAccess.refresh()
-            #if os(iOS) && FINANCEKIT_ENABLED
-            if subscriptionAccess.hasAccess { await financeKitSync.syncOnForeground() }
-            #endif
-          }
+    let services = assembly.connection
+    let connection = services.connection
+    let finance = assembly.finance
+
+    ContentView(
+      subscriptionAccess: services.subscriptionAccess,
+      connection: connection,
+      analytics: assembly.analytics,
+      telemetryBuildDetails: assembly.telemetryBuildDetails,
+      diagnostics: assembly.diagnostics,
+      financeData: finance.financeData,
+      spendingComparison: finance.spendingComparison,
+      appleCardConnection: finance.appleCardConnection,
+      firstRun: firstRun,
+      financeKitSync: finance.financeKitSync,
+      notificationManager: assembly.notifications,
+      remoteAssistant: finance.remoteAssistant,
+      localAssistantHistory: assembly.localAssistantHistory,
+      transactionHistoryStoreFactory: finance.transactionHistoryStoreFactory,
+      localTransactionHistoryStoreFactory: finance.localTransactionHistoryStoreFactory,
+      makeAssistantMessageID: { UUID() },
+      now: { .now }
+    )
+    .task(id: scenePhase) {
+      guard scenePhase == .active else { return }
+      await finance.appleCardConnection.refresh()
+    }
+    .onChange(of: scenePhase) { _, phase in
+      if phase == .active {
+        Task {
+          await services.subscriptionAccess.refresh()
+          #if os(iOS) && FINANCEKIT_ENABLED
+          if services.subscriptionAccess.hasAccess { await finance.financeKitSync.syncOnForeground() }
+          #endif
         }
       }
-      .onChange(of: connection.status) { _, status in
-        if status == .notConnected && connection.isSignedOut {
-          firstRun = makeFirstRun()
-        }
+    }
+    .onChange(of: connection.status) { _, status in
+      if status == .notConnected && connection.isSignedOut {
+        firstRun = assembly.makeFirstRun()
       }
-      .onChange(of: subscriptionAccess.hasAccess, initial: true) { _, allowed in
-        if allowed { Task {
-          await financeKitPublisher.resumeIfConfigured()
-          await financeData.refresh()
-          await notificationManager.applicationDidFinishLaunching()
-          await notificationManager.didConnect()
-        } }
-        else {
-          if !SureDemoServer.matchesBaseURL(connection.connectedServerURL) {
-            financeData.suspendSync()
-          }
-          if !connection.isDemoServer {
-            connection.suspendAuthentication()
-            oauthService.cancelAuthentication()
-            mobileSSOService.cancelAuthentication()
-          }
-        }
-      }
-      .onOpenURL { url in
-        guard subscriptionAccess.hasAccess || connection.isDemoServer else { return }
-        mobileSSOService.handleOpenURL(url)
-      }
+    }
+    .onChange(of: services.subscriptionAccess.hasAccess, initial: true) { _, allowed in
+      assembly.backendAccessChanged(allowed)
+    }
+    .onOpenURL { url in
+      guard services.subscriptionAccess.hasAccess || connection.isDemoServer else { return }
+      services.mobileSSOService.handleOpenURL(url)
     }
   }
 }
