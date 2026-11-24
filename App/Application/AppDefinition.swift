@@ -2,9 +2,7 @@ import SwiftUI
 
 @main
 struct AppDefinition: App {
-  private let localAssistantHistory = LocalAssistantHistoryFile(
-    directory: URL.applicationSupportDirectory.appending(path: "am.sure.insights/assistant-history")
-  )
+  private let root = ApplicationRoot()
 
   #if os(iOS)
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -12,12 +10,11 @@ struct AppDefinition: App {
 
   var body: some Scene {
     WindowGroup {
-      // Unit test hosts must not construct Keychain, FinanceKit, StoreKit,
-      // analytics, notification, or Watch services as a side effect of launch.
+      // Unit test hosts must not construct live services as a side effect of launch.
       if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil || NSClassFromString("XCTestCase") != nil {
         Color.clear
       } else {
-        ApplicationView(localAssistantHistory: localAssistantHistory) { notifications, gate in
+        ApplicationView(assembly: root.assembly) { notifications, gate in
           #if os(iOS)
           appDelegate.notificationEventHandler = notifications
           appDelegate.canReceiveBackendNotifications = { gate.isAllowed }
@@ -26,4 +23,10 @@ struct AppDefinition: App {
       }
     }
   }
+}
+
+@MainActor
+private final class ApplicationRoot {
+  // Resolve on the first window launch and reuse the same connection in later windows.
+  lazy var assembly = ApplicationAssembly()
 }

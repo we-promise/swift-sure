@@ -157,6 +157,46 @@ struct AssistantStoreTests {
     #expect(differentAccount.localConversations.first?.messages.map(\.content) == ["Standalone question", "Local answer"])
   }
 
+  @Test("Logout prevents an open window from saving its erased transcript again")
+  func logoutInvalidatesAssistantInEveryWindow() async throws {
+    let directory = URL.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let history = LocalAssistantHistoryFile(directory: directory)
+    let connection = AssistantConnectionStub(isConfigured: true)
+    let firstWindow = makeStore(connection: connection, localHistory: history, historyScope: "account")
+    let secondWindow = makeStore(connection: connection, localHistory: history, historyScope: "account")
+    let lifecycle = ApplicationConnectionLifecycle()
+    lifecycle.clearAssistantHistory = { try await history.removeAll() }
+
+    firstWindow.draft = "Private account question"
+    await firstWindow.send(to: .localModel)
+    await secondWindow.refreshLocalConversations()
+    let conversation = try #require(secondWindow.localConversations.first)
+    secondWindow.selectLocalConversation(conversation)
+    #expect(secondWindow.messages.contains { $0.content == "Private account question" })
+
+    connection.isConfigured = false
+    connection.sessionGeneration += 1
+    await lifecycle.prepareForLogout()
+    #expect(lifecycle.dataCleanupFailure == nil)
+
+    // A queued Send from either window can arrive before SwiftUI replaces its store.
+    firstWindow.draft = "Queued in the first window"
+    secondWindow.draft = "Queued in the second window"
+    await firstWindow.send(to: .localModel)
+    await secondWindow.send(to: .localModel)
+    #expect(try await history.load(scope: "account").isEmpty)
+
+    let signedOutWindow = makeStore(connection: connection, localHistory: history)
+    await signedOutWindow.refreshLocalConversations()
+    #expect(signedOutWindow.messages.count == 1)
+    #expect(signedOutWindow.localConversations.isEmpty)
+    signedOutWindow.draft = "A new standalone conversation"
+    await signedOutWindow.send(to: .localModel)
+    let saved = try await history.load(scope: nil)
+    #expect(saved.flatMap(\.messages).map(\.content) == ["A new standalone conversation", "Local answer"])
+  }
+
   @Test("New remote chats use an abbreviated prompt title")
   func remoteChatTitle() async throws {
     let remote = RemoteAssistantSpy()
@@ -260,10 +300,11 @@ struct AssistantStoreTests {
     #expect(!store.messages.map(\.content).contains("Old account answer"))
     #expect(store.errorMessage == nil)
 
-    store.draft = "New account question"
-    await store.send(to: .sureServer)
+    let newStore = makeStore(connection: connection, remoteAssistant: remote)
+    newStore.draft = "New account question"
+    await newStore.send(to: .sureServer)
     #expect(await remote.createCount == 2)
-    #expect(store.messages.last?.content == "New account answer")
+    #expect(newStore.messages.last?.content == "New account answer")
   }
 
   @Test("A session change during chat creation discards the old chat before sending")
@@ -293,21 +334,22 @@ struct AssistantStoreTests {
     #expect(snapshot.chatIDs.isEmpty)
     #expect(store.errorMessage == nil)
 
-    store.draft = "New account question"
-    await store.send(to: .sureServer)
+    let newStore = makeStore(connection: connection, remoteAssistant: remote)
+    newStore.draft = "New account question"
+    await newStore.send(to: .sureServer)
 
     snapshot = await remote.snapshot()
     #expect(snapshot.createChatCount == 2)
     #expect(snapshot.messages == ["New account question"])
     #expect(snapshot.chatIDs == [deterministicUUID(2)])
-    #expect(store.messages.last?.content == "Sure answered: New account question")
+    #expect(newStore.messages.last?.content == "Sure answered: New account question")
   }
 
   private func makeStore(
     connection: AssistantConnectionStub,
-    remoteAssistant: RemoteAssistantSpy = RemoteAssistantSpy(),
+    remoteAssistant: any RemoteAssistantClient = RemoteAssistantSpy(),
     localResponse: String = "Local answer",
-    localHistory: TestLocalAssistantHistory = TestLocalAssistantHistory(),
+    localHistory: any LocalAssistantHistory = TestLocalAssistantHistory(),
     historyScope: String? = nil
   ) -> AssistantStore {
     let values = AssistantMessageValues()

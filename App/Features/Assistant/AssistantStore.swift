@@ -23,6 +23,7 @@ final class AssistantStore {
   private var conversationLoadGeneration = 0
   private var selectionGeneration = 0
   private let connection: any ConnectionStateProviding
+  private let sessionGeneration: Int
   private let remoteAssistant: any RemoteAssistantClient
   private let localAssistant: any LocalAssistantResponding
   private let localHistory: any LocalAssistantHistory
@@ -40,6 +41,7 @@ final class AssistantStore {
     now: @escaping () -> Date
   ) {
     self.connection = connection
+    sessionGeneration = connection.sessionGeneration
     self.remoteAssistant = remoteAssistant
     self.localAssistant = localAssistant
     self.localHistory = localHistory
@@ -56,6 +58,10 @@ final class AssistantStore {
     ]
   }
 
+  // The view gets a new store when the shared connection changes. The old
+  // store must stop accepting work before SwiftUI has replaced it in every window.
+  private var isCurrentSession: Bool { sessionGeneration == connection.sessionGeneration }
+
   func refreshHistory() async {
     async let local: Void = refreshLocalConversations()
     async let remote: Void = refreshConversations()
@@ -63,8 +69,7 @@ final class AssistantStore {
   }
 
   func refreshLocalConversations() async {
-    guard !isLoadingLocalConversations, !isResponding else { return }
-    let sessionGeneration = connection.sessionGeneration
+    guard isCurrentSession, !isLoadingLocalConversations, !isResponding else { return }
     let scope = historyScope()
     isLoadingLocalConversations = true
     localHistoryLoadFailed = false
@@ -76,18 +81,18 @@ final class AssistantStore {
         let standalone = try await localHistory.load(scope: nil)
         details.append(contentsOf: standalone.filter { !scopedIDs.contains($0.conversation.id) })
       }
-      guard !Task.isCancelled, !isResponding, sessionGeneration == connection.sessionGeneration else { return }
+      guard !Task.isCancelled, !isResponding, isCurrentSession else { return }
       localConversations = details.sorted { $0.conversation.updatedAt > $1.conversation.updatedAt }
     } catch {
-      guard !Self.isCancellation(error), sessionGeneration == connection.sessionGeneration else { return }
+      guard !Self.isCancellation(error), isCurrentSession else { return }
       localHistoryLoadFailed = true
     }
   }
 
   func refreshConversations() async {
+    guard isCurrentSession else { return }
     conversationLoadGeneration += 1
     let requestGeneration = conversationLoadGeneration
-    let sessionGeneration = connection.sessionGeneration
     guard connection.isConfigured else {
       conversations = []
       historyErrorMessage = nil
@@ -104,29 +109,25 @@ final class AssistantStore {
     }
     do {
       let fetched = try await remoteAssistant.fetchConversations()
-      guard !Task.isCancelled, requestGeneration == conversationLoadGeneration,
-            sessionGeneration == connection.sessionGeneration else { return }
+      guard !Task.isCancelled, requestGeneration == conversationLoadGeneration, isCurrentSession else { return }
       conversations = fetched.sorted { $0.updatedAt > $1.updatedAt }
     } catch {
-      guard !Self.isCancellation(error), requestGeneration == conversationLoadGeneration,
-            sessionGeneration == connection.sessionGeneration else { return }
+      guard !Self.isCancellation(error), requestGeneration == conversationLoadGeneration, isCurrentSession else { return }
       historyErrorMessage = error.localizedDescription
     }
   }
 
   func selectConversation(_ conversation: AssistantConversation) async {
-    guard connection.isConfigured, !isResponding else { return }
+    guard isCurrentSession, connection.isConfigured, !isResponding else { return }
     selectionGeneration += 1
     let requestGeneration = selectionGeneration
-    let sessionGeneration = connection.sessionGeneration
     isLoadingConversation = true
     conversationErrorMessage = nil
     errorMessage = nil
 
     do {
       let detail = try await remoteAssistant.fetchConversation(id: conversation.id)
-      guard requestGeneration == selectionGeneration,
-            sessionGeneration == connection.sessionGeneration else { return }
+      guard requestGeneration == selectionGeneration, isCurrentSession else { return }
       activeDestination = .sureServer
       chatID = detail.conversation.id
       selectedConversationID = detail.conversation.id
@@ -139,8 +140,7 @@ final class AssistantStore {
       }
       replaceConversation(detail.conversation)
     } catch {
-      guard requestGeneration == selectionGeneration,
-            sessionGeneration == connection.sessionGeneration else { return }
+      guard requestGeneration == selectionGeneration, isCurrentSession else { return }
       conversationErrorMessage = error.localizedDescription
     }
     if requestGeneration == selectionGeneration {
@@ -149,7 +149,7 @@ final class AssistantStore {
   }
 
   func selectLocalConversation(_ detail: AssistantConversationDetail) {
-    guard !isResponding else { return }
+    guard isCurrentSession, !isResponding else { return }
     startNewConversation()
     activeDestination = .localModel
     selectedLocalConversationID = detail.conversation.id
@@ -157,7 +157,7 @@ final class AssistantStore {
   }
 
   func startNewConversation() {
-    guard !isResponding else { return }
+    guard isCurrentSession, !isResponding else { return }
     selectionGeneration += 1
     activeDestination = nil
     chatID = nil
@@ -172,14 +172,13 @@ final class AssistantStore {
 
   func send(to destination: AssistantDestination) async {
     let prompt = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !prompt.isEmpty, !isResponding, !isLoadingConversation else { return }
+    guard isCurrentSession, !prompt.isEmpty, !isResponding, !isLoadingConversation else { return }
     if let activeDestination, activeDestination != destination {
       // Each destination owns its own transcript, so a local history file
       // never saves a Sure server conversation or feeds it back to the model.
       startNewConversation()
     }
     activeDestination = destination
-    let sessionGeneration = connection.sessionGeneration
     let scope = historyScope()
     let conversation = messages
     draft = ""
@@ -190,7 +189,7 @@ final class AssistantStore {
     defer { isResponding = false }
 
     do {
-      guard connection.sessionGeneration == sessionGeneration else { throw CancellationError() }
+      guard isCurrentSession else { throw CancellationError() }
       let response: String
       switch destination {
       case .localModel:
@@ -198,16 +197,16 @@ final class AssistantStore {
       case .sureServer:
         conversationLoadGeneration += 1
         isLoadingConversations = false
-        response = try await sendToSure(prompt, sessionGeneration: sessionGeneration)
+        response = try await sendToSure(prompt)
       }
-      guard connection.sessionGeneration == sessionGeneration else { throw CancellationError() }
+      guard isCurrentSession else { throw CancellationError() }
       messages.append(makeMessage(role: .assistant, content: response))
     } catch {
-      if !Self.isCancellation(error), connection.sessionGeneration == sessionGeneration {
+      if !Self.isCancellation(error), isCurrentSession {
         errorMessage = error.localizedDescription
       }
     }
-    if let localLease, !Task.isCancelled, connection.sessionGeneration == sessionGeneration {
+    if let localLease, !Task.isCancelled, isCurrentSession {
       await saveLocalConversation(scope: scope, lease: localLease)
     }
   }
@@ -228,14 +227,14 @@ final class AssistantStore {
     do {
       try await localHistory.save(detail, scope: scope, lease: lease)
     } catch {
-      if !Self.isCancellation(error) {
+      if !Self.isCancellation(error), isCurrentSession {
         errorMessage = String(localized: "Couldn’t save this conversation on this device.")
       }
     }
   }
 
-  private func sendToSure(_ prompt: String, sessionGeneration: Int) async throws -> String {
-    guard connection.isConfigured, connection.sessionGeneration == sessionGeneration else {
+  private func sendToSure(_ prompt: String) async throws -> String {
+    guard isCurrentSession, connection.isConfigured else {
       throw SureAPIError.unauthorized
     }
 
@@ -245,7 +244,7 @@ final class AssistantStore {
     } else {
       let title = conversationTitle(for: prompt)
       identifier = try await remoteAssistant.createChat(title: title)
-      guard connection.isConfigured, connection.sessionGeneration == sessionGeneration else {
+      guard isCurrentSession, connection.isConfigured else {
         throw CancellationError()
       }
       selectedConversationID = identifier
@@ -255,7 +254,7 @@ final class AssistantStore {
     }
     chatID = identifier
     let response = try await remoteAssistant.sendMessage(prompt, chatID: identifier)
-    guard connection.isConfigured, connection.sessionGeneration == sessionGeneration else {
+    guard isCurrentSession, connection.isConfigured else {
       chatID = nil
       throw CancellationError()
     }
